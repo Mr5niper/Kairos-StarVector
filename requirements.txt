@@ -1,0 +1,20 @@
+# requirements.txt (add GUI deps)
+numpy
+pandas
+scikit-learn
+scipy
+torch
+torchvision
+torchaudio
+statsmodels
+yfinance
+pyyaml
+tqdm
+lightgbm
+optuna
+skyfield
+transformers
+sentence-transformers
+feedparser
+streamlit
+plotly

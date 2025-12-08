@@ -1,0 +1,37 @@
+# pyproject.toml
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-forecast"
+version = "0.1.0"
+description = "Championship Stock Forecast Framework"
+authors = [{ name = "Kairos Vector" }]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "scipy",
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "statsmodels",
+    "yfinance",
+    "pyyaml",
+    "tqdm",
+    "lightgbm",
+    "optuna",
+    "skyfield",
+    "transformers",
+    "sentence-transformers",
+    "feedparser",
+    "streamlit",
+    "plotly",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stock_forecast*"]

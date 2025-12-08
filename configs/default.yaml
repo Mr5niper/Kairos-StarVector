@@ -1,0 +1,89 @@
+# configs/default.yaml
+seed: 42
+
+data:
+  ticker: "^GSPC"          # e.g., "^GSPC", "AAPL", "BTC-USD"
+  start: "2000-01-01"
+  end: null
+  seq_len: 60
+  target: "log_return"     # "log_return" or "close_delta"
+
+features:
+  mode: "real"             # <- USE REAL PIPELINE (Skyfield + FinBERT + SBERT)
+  news_csv_path: "features/news_headlines.csv"  # CSV with Date, Title
+  news_date_col: "Date"
+  news_text_col: "Title"
+  news_tz: "US/Eastern"
+  singlepass_threshold: 0.72
+  aspect_orb_deg: 3.0
+  aspects_deg: [0, 60, 90, 120, 180]
+  cache_path: "artifacts/cond_features_cache.csv"
+
+splits:
+  train_len: 756
+  val_len: 126
+  test_len: 126
+  step: 126
+
+model:
+  lstm:
+    hidden: 64
+    layers: 2
+    dropout: 0.1
+    epochs: 80
+    batch_size: 64
+    lr: 1.0e-3
+    early_stopping: 8
+    val_metric: "DPA"
+
+  gan:
+    hidden: 64
+    layers: 2
+    dropout: 0.1
+    epochs: 120
+    batch_size: 64
+    lr_g: 2.0e-4
+    lr_d: 2.0e-4
+    betas_g: [0.5, 0.9]
+    betas_d: [0.5, 0.9]
+    crit_steps: 5
+    lambda_gp: 10.0
+    early_stopping: 12
+    val_metric: "DPA"
+
+  residual:
+    enabled: true
+    lgbm_params:
+      n_estimators: 500
+      max_depth: 4
+      learning_rate: 0.05
+      subsample: 0.9
+      colsample_bytree: 0.9
+
+meta_labeling:
+  enabled: true
+  threshold_abs_pred: 0.0
+  lgbm_params:
+    n_estimators: 300
+    max_depth: 3
+    learning_rate: 0.05
+    subsample: 0.9
+    colsample_bytree: 0.9
+
+ablation:
+  residual_compare: true
+  meta_compare: true
+
+eval:
+  metrics: ["RMSE","MAE","MAPE","DPA"]
+  out_dir: "artifacts"
+  save_predictions: true
+
+backtest:
+  tc_bps: 3.0
+
+tuning:
+  enable: false
+  n_trials: 30
+  windows: 3
+  target_metric: "DPA"
