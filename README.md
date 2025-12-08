@@ -1,4 +1,4 @@
-# Kairos Vector — README
+# Kairos StarVector — README
 
 A complete forecasting system with:
 
@@ -359,5 +359,6 @@ python scripts/run_optuna.py
 - First run downloads FinBERT/SBERT and Skyfield ephemeris (internet required).
 - To test quickly: set `features.mode: "dummy"` in config, reduce date range and epochs.
 - Meta-labeling and Residual Fusion can be toggled in sidebar/ YAML.
+
 
 MIT License.
