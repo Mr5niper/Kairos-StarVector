@@ -289,3 +289,232 @@ def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te
             "y_gan_filtered": zeros,
             "y_res": None
         }
+
+with st.sidebar:
+    st.title("Forecast Lab")
+    with st.expander("Data", expanded=True):
+        today = date.today()
+        min_allowed = date(1990, 1, 1)
+        max_allowed = date(2100, 1, 1)
+        ticker = st.text_input("Ticker (Yahoo)", value="^GSPC")
+        start  = st.date_input("Start",  value=max(date(2015,1,1), date(today.year-1, today.month, min(today.day, 28))),
+                               min_value=min_allowed, max_value=max_allowed).isoformat()
+        end    = st.date_input("End",    value=today,
+                               min_value=min_allowed, max_value=max_allowed).isoformat()
+        seq_len= st.number_input("Lookback (seq_len)", min_value=20, max_value=240, value=60, step=5)
+        tiny_mode = st.checkbox("Tiny range mode (auto shrink splits)", value=True)
+    with st.expander("Features", expanded=False):
+        feat_mode = st.selectbox("Feature Mode", ["real", "dummy"], index=0)
+        news_csv  = st.text_input("Headlines CSV (Date, Title)", value="features/news_headlines.csv")
+        aspects   = st.multiselect("Aspects (deg)", options=[0,60,90,120,180], default=[0,60,90,120,180])
+        orb_deg   = st.slider("Aspect orb (deg)", min_value=1.0, max_value=5.0, value=3.0, step=0.5)
+        sp_thresh = st.slider("SinglePass sim threshold", min_value=0.5, max_value=0.95, value=0.72, step=0.01)
+    with st.expander("Models", expanded=False):
+        enable_res = st.checkbox("Residual Fusion", value=True)
+        enable_meta= st.checkbox("Meta-Labeling", value=True)
+        debug_mode = st.checkbox("Debug mode (show errors)", value=True, key="dbg")
+    with st.expander("Backtest", expanded=False):
+        tc_bps = st.slider("Transaction cost (bps)", min_value=0.0, max_value=20.0, value=3.0, step=0.5)
+    with st.expander("🕸️ Gann/Fan Overlay", expanded=False):
+        enable_gann = st.checkbox("Enable overlay", value=False)
+        g_pA = st.selectbox("Planet A", PLANETS, index=2, key="g_pA")
+        g_pB = st.selectbox("Planet B", PLANETS, index=4, key="g_pB")
+        g_aspects = st.multiselect("Aspects (deg)", [0,30,45,60,90,120,135,144,150,180], default=[0,60,90,120,180], key="g_aspects")
+        g_orb = st.slider("Orb (deg)", 0.5, 5.0, 2.0, 0.5, key="g_orb")
+        g_max_anchors = st.number_input("Max anchors", 1, 200, 36, 1, key="g_max")
+        g_extend = st.number_input("Extend days", 0, 365, 180, 10, key="g_ext")
+        g_price_step = st.number_input("Horizontal step (price units)", value=72.0, step=1.0, key="g_step")
+        g_slope_scale = st.slider("1x1 slope scale", 0.10, 3.0, 1.2, 0.05, key="g_scale")
+        g_both_dirs = st.checkbox("Fans both directions", True, key="g_both")
+        g_add_verticals = st.checkbox("Verticals at alignments", True, key="g_v")
+        g_ratios_labels = ["1x8","1x4","1x3","1x2","1x1","2x1","3x1","4x1","8x1"]
+        g_ratios = st.multiselect("Fan ratios", g_ratios_labels, default=g_ratios_labels, key="g_ratios")
+        st.markdown("— Planetary price lines —")
+        g_show_astro = st.checkbox("Add planetary price lines", value=True, key="g_show_astro")
+        g_planets = st.multiselect("Planets (lines)", PLANETS, default=["MARS","JUPITER","SATURN"], key="g_planets")
+        g_harmonics = st.multiselect("Harmonics", [-2,-1,0,1,2], default=[-1,0,1], key="g_harm")
+        g_deg_to_price = st.number_input("Degree → Price scale", value=3.0, step=0.1, key="g_scale_deg")
+        if st.button("Clear astro cache", key="clear_astro"):
+            _cached_planets.clear()
+    st.markdown("---")
+    build_btn = st.button("Build Features Cache")
+    run_btn   = st.button("Start")
+st.title("Market Forecast Lab")
+st.caption(f"Device: {device_info()}")
+cfg = {
+    "seed": 42,
+    "data": {"ticker": ticker, "start": start, "end": end, "seq_len": int(seq_len), "target": "log_return"},
+    "features": {"mode": feat_mode, "news_csv_path": news_csv, "news_date_col": "Date", "news_text_col": "Title",
+                 "singlepass_threshold": float(sp_thresh), "aspect_orb_deg": float(orb_deg), "aspects_deg": aspects,
+                 "cache_path": "artifacts/cond_features_cache.csv"},
+    "splits": {"train_len": 756, "val_len": 126, "test_len": 126, "step": 126},
+    "model": {
+        "lstm": {"hidden":64,"layers":2,"dropout":0.1,"epochs":40,"batch_size":64,"lr":1.0e-3,"early_stopping":8,"val_metric":"DPA"},
+        "gan": {"hidden":64,"layers":2,"dropout":0.1,"epochs":80,"batch_size":64,"lr_g":2.0e-4,"lr_d":2.0e-4,"betas_g":[0.5,0.9],"betas_d":[0.5,0.9],"crit_steps":5,"lambda_gp":10.0,"early_stopping":10,"val_metric":"DPA"},
+        "residual": {"enabled": bool(enable_res), "lgbm_params":{"n_estimators":400,"max_depth":4,"learning_rate":0.05,"subsample":0.9,"colsample_bytree":0.9}}
+    },
+    "meta_labeling": {"enabled": bool(enable_meta), "threshold_abs_pred": 0.0, "lgbm_params":{"n_estimators":250,"max_depth":3,"learning_rate":0.05,"subsample":0.9,"colsample_bytree":0.9}},
+    "ablation": {"residual_compare": True, "meta_compare": True},
+    "backtest": {"tc_bps": float(tc_bps)}
+}
+if build_btn and feat_mode == "real":
+    ensure_dir("artifacts")
+    st.write("Building features (astro + event)…")
+    df_tmp = fetch_ohlc_yf(ticker, start=start, end=end)
+    cond_df, cond_dim = assemble_conditional("real", df_tmp, cfg["features"])
+    st.success(f"Cached at {cfg['features']['cache_path']} (cond_dim={cond_dim}).")
+if run_btn:
+    set_seed(cfg.get("seed", 42))
+    import torch; device = "cuda" if torch.cuda.is_available() else "cpu"
+    df = fetch_ohlc_yf(ticker, start=start, end=end)
+    y_series = make_target(df['Close'], mode="log_return")
+    cond_df, cond_dim = assemble_conditional(cfg['features']['mode'], df, cfg['features'])
+    idx = y_series.index.intersection(cond_df.index)
+    y_series = y_series.loc[idx]; cond_df = cond_df.loc[idx]; df_aligned = df.loc[idx]
+    
+    N = len(y_series)
+    seq = int(cfg['data']['seq_len'])
+    # tiny-range friendly splits
+    seq, tr, va, te = auto_splits_for_small_ranges(N, seq, min_train_seq=16, va_min=5, te_min=5)
+    step = max(te, 3)
+    cfg['data']['seq_len'] = seq
+    cfg['splits'].update({"train_len": tr, "val_len": va, "test_len": te, "step": step})
+    # shorten training for tiny ranges
+    if (tr - seq) < 60:
+        cfg["model"]["lstm"]["epochs"] = 12
+        cfg["model"]["gan"]["epochs"] = 20
+        cfg["model"]["lstm"]["early_stopping"] = 4
+        cfg["model"]["gan"]["early_stopping"] = 6
+
+    st.markdown(f'<div class="run-header">Ticker {ticker} | {start} → {end} | N={N} | splits (tr={tr}, va={va}, te={te})</div>', unsafe_allow_html=True)
+    # --- Start of Patch 4 ---
+    log_area = st.empty()
+    def log(msg: str):
+        ts = pd.Timestamp.now().strftime("%H:%M:%S")
+        log_area.write(f"[{ts}] {msg}")
+    # --- End of Patch 4 ---
+    progress_bar = st.progress(0, text="Preparing…")
+    results_all, first_preds = [], None
+    total_windows = sum(1 for _ in rolling_windows(N, seq, tr, va, te, step))
+    # --- Start of Patch 6 (modified) ---
+    if total_windows == 0:
+        if N < (seq + 9):
+            st.error(f"Need ~{seq+9} bars; you have {N}. Reduce lookback or widen dates.")
+            st.stop()
+        tr_i = (0, tr); va_i = (tr, tr+va); te_i = (tr+va, tr+va+te)
+        wr, preds = run_window(df_aligned, y_series, cond_df, cfg, device, 1, tr_i, va_i, te_i, debug=debug_mode, log_cb=log)
+        if wr is None:
+            st.error("Could not build a tiny window. Reduce lookback or widen dates.")
+            st.stop()
+        results_all = [wr]; first_preds = preds
+        st.success("Completed 1 tiny window.")
+    else:
+        for w_id, (tr_i, va_i, te_i) in enumerate(rolling_windows(N, seq, tr, va, te, step), start=1):
+            progress_bar.progress(int((w_id / total_windows) * 100), text=f"Window {w_id}/{total_windows}")
+            wr, preds = run_window(df_aligned, y_series, cond_df, cfg, device, w_id, tr_i, va_i, te_i, debug=debug_mode, log_cb=log)
+            # Collect results regardless of individual model errors (handled internally by run_window)
+            wr["window"] = {"start": str(df_aligned.index[te_i[0]]), "end": str(df_aligned.index[te_i[1]-1])}
+            results_all.append(wr)
+            if first_preds is None: first_preds = preds
+        st.success(f"Completed {len(results_all)} windows.")
+    # --- End of Patch 6 (modified) ---
+    
+    tabs = st.tabs(["Dashboard", "Predictions", "Gann/Fan Grid", "Features", "Windows", "Logs"])
+    with tabs[0]:
+        st.subheader("Averaged Performance")
+        def aggregate_with_ci(results_all, model_key):
+            keys = set()
+            for r in results_all:
+                if model_key in r: keys.update(r[model_key].keys())
+            stats = {}
+            for k in keys:
+                vals = [r[model_key][k] for r in results_all if model_key in r and k in r[model_key]]
+                if len(vals) == 0: continue
+                stats[k] = {"mean": float(np.mean(vals))}
+            return stats
+        model_blocks = {"ARIMA":"ARIMA","LSTM (Cond)":"LSTM_COND","cWGAN-GP (Cond)":"CWGAN_GP_COND","cWGAN-GP + Meta":"CWGAN_GP_COND_META","Residual Fusion":"RESIDUAL_FUSION"}
+        cols = st.columns(len(model_blocks))
+        for i, (title, key) in enumerate(model_blocks.items()):
+            stats = aggregate_with_ci(results_all, key)
+            dpa = stats.get("DPA", {}).get("mean", None); rmse = stats.get("RMSE", {}).get("mean", None)
+            with cols[i]:
+                kpi_card(title, f"DPA {dpa:.3f}" if dpa is not None and not np.isnan(dpa) else "N/A")
+                st.caption(f"RMSE {rmse:.4f}" if rmse is not None and not np.isnan(rmse) else "")
+        st.markdown("---")
+        st.subheader("Equity Curves (First Test Window)")
+        if first_preds:
+            curves = {"ARIMA": first_preds["y_arima"], "LSTM": first_preds["y_lstm"], "GAN": first_preds["y_gan"], "GAN (Meta)": first_preds["y_gan_filtered"]}
+            if first_preds["y_res"] is not None: curves["Residual"] = first_preds["y_res"]
+            plot_equity_curve(first_preds["y_true"], curves, tc_bps=cfg["backtest"]["tc_bps"])
+        else:
+            st.info("No predictions captured.")
+    with tabs[1]:
+        st.subheader("Predictions vs True — First Test Window")
+        if first_preds:
+            df_plot = pd.DataFrame({"Date": first_preds["dates"], "True": first_preds["y_true"],
+                                    "ARIMA": first_preds["y_arima"], "LSTM": first_preds["y_lstm"],
+                                    "GAN": first_preds["y_gan"], "GAN (Meta)": first_preds["y_gan_filtered"]})
+            if first_preds["y_res"] is not None: df_plot["Residual"] = first_preds["y_res"]
+            model_cols = [c for c in df_plot.columns if c not in ["Date","True"]]
+            use_index = st.checkbox("Convert to cumulative index (base=100)", value=True)
+            if use_index:
+                df_plot["True"] = to_index_from_logret(df_plot["True"].values)
+                for c in model_cols: df_plot[c] = to_index_from_logret(df_plot[c].values)
+            use_holdings = st.checkbox("Show as Firm Holdings (stacked area)", value=True)
+            if use_holdings: plot_firm_holdings(df_plot, model_cols)
+            else: plot_predictions(df_plot, model_cols)
+            st.download_button("Download first-window predictions CSV", data=df_plot.to_csv(index=False).encode("utf-8"), file_name="preds_first_window.csv", mime="text/csv")
+        else:
+            st.info("No predictions to show.")
+    with tabs[2]:
+        st.subheader("Price with Gann/Fan + Planetary Overlay")
+        dates = df_aligned.index; close = df_aligned["Close"]
+        if enable_gann:
+            ratios_map = {"1x8":1/8,"1x4":1/4,"1x3":1/3,"1x2":1/2,"1x1":1,"2x1":2,"3x1":3,"4x1":4,"8x1":8}
+            shapes = build_overlay_shapes(dates, close, (g_pA, g_pB), g_aspects, float(g_orb), int(g_max_anchors),
+                                          [ratios_map[r] for r in g_ratios], float(g_slope_scale), int(g_extend),
+                                          bool(g_both_dirs), bool(g_add_verticals), float(g_price_step))
+            end_ext = dates[-1] + pd.Timedelta(days=int(g_extend))
+            fig = go.Figure()
+            fig.add_trace(go.Candlestick(x=dates, open=df_aligned["Open"], high=df_aligned["High"], low=df_aligned["Low"], close=close,
+                                         increasing_line_color="#2ECC71", decreasing_line_color="#E74C3C"))
+            if g_show_astro and g_planets:
+                for tr in planet_price_traces(dates, close, g_planets, g_harmonics, g_deg_to_price):
+                    fig.add_trace(tr)
+            fig.update_layout(height=760, margin=dict(l=0,r=0,t=24,b=0), xaxis=dict(range=[dates[0], end_ext]), shapes=shapes, showlegend=g_show_astro)
+            st.plotly_chart(fig, width="stretch")
+            html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+            st.download_button("Download overlay (HTML)", data=html, file_name="gann_overlay.html", mime="text/html")
+        else:
+            st.info("Enable overlay in the sidebar.")
+    with tabs[3]:
+        st.subheader("Feature Explorer")
+        cache_path = cfg['features']['cache_path']
+        if os.path.exists(cache_path):
+            cdf = pd.read_csv(cache_path, parse_dates=['Date']).set_index('Date')
+            st.write("Columns:", list(cdf.columns))
+            sel_cols = st.multiselect("Select features to plot", options=list(cdf.columns), default=list(cdf.columns)[:4])
+            if sel_cols:
+                fig = go.Figure()
+                for col in sel_cols: fig.add_trace(go.Scatter(x=cdf.index, y=cdf[col], mode="lines", name=col))
+                fig.update_layout(legend=dict(orientation="h"), height=400, margin=dict(l=0, r=0, t=10, b=0))
+                st.plotly_chart(fig, width="stretch")
+            st.download_button("Download cached features CSV", data=cdf.to_csv().encode("utf-8"), file_name="cond_features_cache.csv")
+        else:
+            st.warning("No cached features found. Click 'Build Features Cache' first (Real Mode).")
+    with tabs[4]:
+        st.subheader("Windows")
+        if results_all:
+            rows = []
+            for r in results_all:
+                ws = r["window"]["start"]; we = r["window"]["end"]
+                for label, key in [("ARIMA","ARIMA"),("LSTM_COND","LSTM_COND"),("CWGAN_GP_COND","CWGAN_GP_COND"),("CWGAN_GP_COND_META","CWGAN_GP_COND_META"),("RESIDUAL_FUSION","RESIDUAL_FUSION")]:
+                    if key in r:
+                        row = {"WindowStart": ws, "WindowEnd": we, "Model": label}; row.update(r[key]); rows.append(row)
+            if rows: st.dataframe(pd.DataFrame(rows))
+            else: st.info("No window results found.")
+        else:
+            st.info("No runs yet.")
+    with tabs[5]:
+        st.subheader("Logs")
+        st.caption("See the progress banner and tabs for details.")
