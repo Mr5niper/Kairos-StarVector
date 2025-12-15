@@ -158,7 +158,7 @@ def generate_astro_features_real(
         "astro_bradley": bradley,
         "astro_gann_prox": gann_prox
     }, index=dates)
-    astro_df = astro_df.replace([np.inf, -np.inf], np.nan).fillna(method='ffill').fillna(method='bfill')
+    astro_df = astro_df.replace([np.inf, -np.inf], np.nan).ffill().bfill()
     return astro_df
 
 # ---------------------------------------------------------------------------
