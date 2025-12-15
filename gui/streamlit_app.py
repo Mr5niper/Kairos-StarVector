@@ -100,6 +100,36 @@ def plot_equity_curve(y_true: np.ndarray, preds_map: Dict[str, np.ndarray], tc_b
 def to_index_from_logret(arr: np.ndarray, base: float = 100.0) -> np.ndarray:
     arr = np.asarray(arr).ravel()
     return float(base) * np.exp(np.cumsum(arr))
+def auto_splits_for_small_ranges(N: int, seq: int,
+                                 tr_min: int = 20, va_min: int = 5, te_min: int = 5):
+    """
+    Pick seq, train, val, test so at least one window works even with tiny spans.
+    Guarantees: seq>=5, tr>=3, va>=3, te>=3 and tr+va+te+seq <= N.
+    """
+    # shrink seq if needed (leave room for tr/va/te)
+    seq = max(5, min(seq, max(5, N // 4)))
+    free = max(N - seq, 0)
+    # if still tiny, split 60/20/20 but respect minimums
+    if free <= 0:
+        return 5, 3, 3, 3  # caller will catch and warn if N < 14
+    tr = max(tr_min, int(free * 0.6))
+    va = max(va_min, int(free * 0.2))
+    te = max(te_min, free - tr - va)
+    # if over-allocated, trim train first, then val
+    while (tr + va + te) > free and tr > tr_min:
+        tr -= 1
+    while (tr + va + te) > free and va > va_min:
+        va -= 1
+    while (tr + va + te) > free and te > te_min:
+        te -= 1
+    # last guard: if still too big, compress evenly and keep >=3 bars each
+    need = tr + va + te
+    if need > free:
+        spare = free
+        te = max(3, int(spare * 0.2)); spare -= te
+        va = max(3, int(spare * 0.25)); spare -= va
+        tr = max(3, spare)
+    return int(seq), int(tr), int(va), int(te)
 def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te, log_cb=None):
     def log(msg): 
         if log_cb: log_cb(msg)
@@ -197,6 +227,7 @@ with st.sidebar:
         end    = st.date_input("End",    value=today,
                                min_value=min_allowed, max_value=max_allowed).isoformat()
         seq_len= st.number_input("Lookback (seq_len)", min_value=20, max_value=240, value=60, step=5)
+        tiny_mode = st.checkbox("Tiny range mode (auto shrink splits)", value=True)
     # --- End of Patch 1 ---
     with st.expander("Features", expanded=False):
         feat_mode = st.selectbox("Feature Mode", ["real", "dummy"], index=0)
@@ -266,26 +297,46 @@ if run_btn:
     idx = y_series.index.intersection(cond_df.index)
     y_series = y_series.loc[idx]; cond_df = cond_df.loc[idx]; df_aligned = df.loc[idx]
     N = len(y_series); seq = int(cfg['data']['seq_len'])
-    tr = cfg['splits']['train_len']; va = cfg['splits']['val_len']; te = cfg['splits']['test_len']; step = cfg['splits']['step']
-    min_need = seq + tr + va + te
-    if N <= min_need:
-        free = max(N - seq, 30)
-        tr = max(int(free*0.6), 30); va = max(int(free*0.2), 10); te = max(free - tr - va, 10); step = max(te, 10)
+    # --- Start of Patch 2 & 4 ---
+    tr_min = 10 if tiny_mode else 20
+    va_min = 3 if tiny_mode else 5
+    te_min = 3 if tiny_mode else 5
+    seq, tr, va, te = auto_splits_for_small_ranges(N, seq, tr_min=tr_min, va_min=va_min, te_min=te_min)
+    step = max(te, 3)
+    cfg['data']['seq_len'] = seq
+    cfg['splits'].update({"train_len": tr, "val_len": va, "test_len": te, "step": step})
+    # --- End of Patch 2 & 4 ---
     st.markdown(f'<div class="run-header">Ticker {ticker} | {start} → {end} | N={N} | splits (tr={tr}, va={va}, te={te})</div>', unsafe_allow_html=True)
     progress_bar = st.progress(0, text="Preparing…")
     results_all, first_preds = [], None
     total_windows = sum(1 for _ in rolling_windows(N, seq, tr, va, te, step))
+    # --- Start of Patch 3 ---
     if total_windows == 0:
-        st.error("Not enough data for one window. Widen date range or reduce lookback.")
-        st.stop()
-    for w_id, (tr_i, va_i, te_i) in enumerate(rolling_windows(N, seq, tr, va, te, step), start=1):
-        progress_bar.progress(int((w_id / total_windows) * 100), text=f"Window {w_id}/{total_windows}")
-        wr, preds = run_window(df_aligned, y_series, cond_df, cfg, device, w_id, tr_i, va_i, te_i)
-        if wr is None: continue
-        wr["window"] = {"start": str(df_aligned.index[te_i[0]]), "end": str(df_aligned.index[te_i[1]-1])}
-        results_all.append(wr)
-        if first_preds is None: first_preds = preds
-    st.success(f"Completed {len(results_all)} windows.")
+        # force a single tiny window
+        if N < (seq + 9):
+            st.error(f"Need at least ~{seq+9} bars; you have {N}. Reduce lookback or widen dates.")
+            st.stop()
+        tr_i = (0, tr)
+        va_i = (tr, tr + va)
+        te_i = (tr + va, tr + va + te)
+        wr, preds = run_window(df_aligned, y_series, cond_df, cfg, device, 1, tr_i, va_i, te_i)
+        if wr is None:
+            st.error("Could not build a tiny window. Reduce lookback or widen dates.")
+            st.stop()
+        results_all = [wr]
+        first_preds = preds
+        st.success("Completed 1 tiny window.")
+    else:
+        for w_id, (tr_i, va_i, te_i) in enumerate(rolling_windows(N, seq, tr, va, te, step), start=1):
+            progress_bar.progress(int((w_id / total_windows) * 100), text=f"Window {w_id}/{total_windows}")
+            wr, preds = run_window(df_aligned, y_series, cond_df, cfg, device, w_id, tr_i, va_i, te_i)
+            if wr is None: continue
+            wr["window"] = {"start": str(df_aligned.index[te_i[0]]), "end": str(df_aligned.index[te_i[1]-1])}
+            results_all.append(wr)
+            if first_preds is None: first_preds = preds
+    # --- End of Patch 3 ---
+    if total_windows > 0:
+        st.success(f"Completed {len(results_all)} windows.")
     tabs = st.tabs(["Dashboard", "Predictions", "Gann/Fan Grid", "Features", "Windows", "Logs"])
     with tabs[0]:
         st.subheader("Averaged Performance")
