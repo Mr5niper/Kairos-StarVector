@@ -316,11 +316,16 @@ with st.sidebar:
         g_slope_scale = st.slider("1x1 slope scale", 0.10, 3.0, 1.0, 0.05, key="g_scale")
         g_both_dirs = st.checkbox("Fans both directions", True, key="g_both")
         g_add_verticals = st.checkbox("Verticals at alignments", True, key="g_v")
+        g_ratios_labels = ["1x8","1x4","1x3","1x2","1x1","2x1","3x1","4x1","8x1"]
+        g_ratios_map = {"1x8":1/8,"1x4":1/4,"1x3":1/3,"1x2":1/2,"1x1":1,"2x1":2,"3x1":3,"4x1":4,"8x1":8}
+        g_ratios = st.multiselect("Fan ratios", g_ratios_labels, default=g_ratios_labels, key="g_ratios")
         st.markdown("— Planetary price lines —")
         g_show_astro = st.checkbox("Add planetary price lines", value=False, key="g_show_astro")
         g_planets = st.multiselect("Planets (lines)", PLANETS, default=["MARS","JUPITER","SATURN"], key="g_planets")
         g_harmonics = st.multiselect("Harmonics", [-2,-1,0,1,2], default=[-1,0,1], key="g_harm")
         g_deg_to_price = st.number_input("Degree → Price scale", value=2.0, step=0.1, key="g_scale_deg")
+        if st.button("Clear astro cache", key="clear_astro"):
+            _cached_planets.clear()
     st.markdown("---")
     build_btn = st.button("🧱 Build Features Cache (Real Mode)")
     run_btn   = st.button("🚀 Run Benchmark")
@@ -533,7 +538,7 @@ if run_btn:
                 aspects_deg=g_aspects,
                 orb_deg=float(g_orb),
                 max_anchors=int(g_max_anchors),
-                ratios=[1/8,1/4,1/3,1/2,1,2,3,4,8],
+                ratios=[{"1x8":1/8,"1x4":1/4,"1x3":1/3,"1x2":1/2,"1x1":1,"2x1":2,"3x1":3,"4x1":4,"8x1":8}[r] for r in g_ratios],
                 slope_scale=float(g_slope_scale),
                 extend_days=int(g_extend),
                 both_dirs=bool(g_both_dirs),
