@@ -355,10 +355,6 @@ def scale_fit_transform(train_arr: np.ndarray, val_arr: np.ndarray, test_arr: np
         return scaler, tr.astype(np.float32), va.astype(np.float32), te.astype(np.float32)
 
 def get_raw_planetary_positions(dates: pd.DatetimeIndex) -> pd.DataFrame:
-    """
-    Public wrapper to get raw planetary longitudes (0..360) indexed by dates.
-    """
     longs = _planet_positions(dates)
     df_astro = pd.DataFrame(longs, index=dates)
-    df_astro = df_astro.fillna(method='ffill').fillna(method='bfill')
-    return df_astro
+    return df_astro.ffill().bfill()
