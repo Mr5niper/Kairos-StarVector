@@ -22,8 +22,7 @@ from stock_forecast.eval import evaluate_predictions
 from stock_forecast.metrics import diebold_mariano
 from stock_forecast.backtest import simple_long_short
 from stock_forecast.meta_labeling import (
-    build_meta_features, build_meta_labels,
-    safe_train_meta_clf, apply_meta_clf
+    build_meta_features, build_meta_labels, safe_train_meta_clf, apply_meta_clf
 )
 from stock_forecast.gann_grid import build_overlay_shapes, PLANETS
 st.set_page_config(page_title="Market Forecast Lab", layout="wide")
@@ -103,25 +102,36 @@ def plot_equity_curve(y_true: np.ndarray, preds_map: Dict[str, np.ndarray], tc_b
 def to_index_from_logret(arr: np.ndarray, base: float = 100.0) -> np.ndarray:
     arr = np.asarray(arr).ravel()
     return float(base) * np.exp(np.cumsum(arr))
+# --- tiny-range split helper (paste once) ---
 def auto_splits_for_small_ranges(N: int, seq: int,
-                                 tr_min: int = 20, va_min: int = 5, te_min: int = 5):
-    seq = max(5, min(seq, max(5, N // 4)))
-    free = max(N - seq, 0)
-    if free <= 0:
-        return 5, 3, 3, 3
-    tr = max(tr_min, int(free * 0.6))
+                                 min_train_seq: int = 16,
+                                 va_min: int = 5,
+                                 te_min: int = 5,
+                                 min_seq: int = 5):
+    """
+    Returns (seq, tr, va, te) that guarantee:
+      - seq >= min_seq
+      - (tr - seq) >= min_train_seq  (at least this many training sequences)
+      - va >= va_min, te >= te_min
+      - seq + tr + va + te <= N
+    """
+    # clamp seq so we have room for tr/va/te
+    seq = int(max(min_seq, min(seq, max(min_seq, N // 3))))
+    # ensure remaining bars can satisfy min train/val/test
+    min_free = min_train_seq + va_min + te_min
+    if (N - seq) < min_free:
+        seq = max(min_seq, N - min_free)
+    free = max(0, N - seq)
+    train_seq = max(min_train_seq, int(free * 0.6))
+    if train_seq > free - (va_min + te_min):
+        train_seq = max(min_train_seq, free - (va_min + te_min))
     va = max(va_min, int(free * 0.2))
-    te = max(te_min, free - tr - va)
-    while (tr + va + te) > free and tr > tr_min: tr -= 1
-    while (tr + va + te) > free and va > va_min: va -= 1
-    while (tr + va + te) > free and te > te_min: te -= 1
-    need = tr + va + te
-    if need > free:
-        spare = free
-        te = max(3, int(spare * 0.2)); spare -= te
-        va = max(3, int(spare * 0.25)); spare -= va
-        tr = max(3, spare)
+    te = max(te_min, free - train_seq - va)
+    while train_seq + va + te > free and va > va_min: va -= 1
+    while train_seq + va + te > free and te > te_min: te -= 1
+    tr = seq + max(0, train_seq)
     return int(seq), int(tr), int(va), int(te)
+# --- tiny-range split helper (paste once) ---
 def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te, log_cb=None):
     def log(msg): 
         if log_cb: log_cb(msg)
@@ -159,10 +169,9 @@ def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te
         G, D, _ = train_cwgan_gp(X_tr, Cseq_tr, t_tr, X_va, Cseq_va, t_va, cfg['model']['gan'], y_scaler, device=device)
         yhat_gan_s = predict_deep(G, X_te, Cseq_te, device)
         yhat_gan = y_scaler.inverse_transform(yhat_gan_s.reshape(-1,1)).ravel()
-        # --- Start of Patch 7 (Meta) ---
         log(f"Window {window_id}: Meta-Labeling …")
         yhat_gan_filtered = yhat_gan.copy()
-        if cfg['meta_labeling']['enabled']:
+        if cfg['meta_labeling']['enabled'] and len(Cseq_va) >= 5:
             preds_val_s = predict_deep(G, X_va, Cseq_va, device)
             preds_val = y_scaler.inverse_transform(preds_val_s.reshape(-1,1)).ravel()
             y_true_val = y_series.values[va[0]:va[1]][-len(preds_val):]
@@ -173,24 +182,22 @@ def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te
             C_last_te = Cseq_te[:, -1, :]
             meta_X_te = build_meta_features(C_last_te, yhat_gan, returns_vol=None)
             yhat_gan_filtered, _ = apply_meta_clf(clf, meta_X_te, yhat_gan)
-        # --- End of Patch 7 (Meta) ---
-        # --- Start of Patch 7 (Residual) ---
         yhat_res = None
         if cfg['model']['residual']['enabled'] and len(t_tr) >= 20:
             log(f"Window {window_id}: Residual Fusion …")
             import lightgbm as lgb
             params = cfg['model']['residual']['lgbm_params']
             F_tr = get_cond_2d(X_tr, Cseq_tr); F_va = get_cond_2d(X_va, Cseq_va); F_te = get_cond_2d(X_te, Cseq_te)
-            lgbm = lgb.LGBMRegressor(**params, random_state=42)
-            lgbm.fit(F_tr, t_tr.ravel(), eval_set=[(F_va, t_va.ravel())], verbose=False)
-            yhat_lgbm_te = lgbm.predict(F_te).reshape(-1,1)
-            yhat_lgbm_tr = lgbm.predict(F_tr).reshape(-1,1)
-            res_tr = t_tr - yhat_lgbm_tr
-            G_res, _, _ = train_cwgan_gp(X_tr, Cseq_tr, res_tr, X_va, Cseq_va, t_va, cfg['model']['gan'], y_scaler, device=device)
-            res_hat_te_s = predict_deep(G_res, X_te, Cseq_te, device).reshape(-1,1)
-            yhat_res_s = yhat_lgbm_te + res_hat_te_s
-            yhat_res = y_scaler.inverse_transform(yhat_res_s).ravel()
-        # --- End of Patch 7 (Residual) ---
+            if len(F_tr) >= 10:
+                lgbm = lgb.LGBMRegressor(**params, random_state=42)
+                lgbm.fit(F_tr, t_tr.ravel(), eval_set=[(F_va, t_va.ravel())], verbose=False)
+                yhat_lgbm_te = lgbm.predict(F_te).reshape(-1,1)
+                yhat_lgbm_tr = lgbm.predict(F_tr).reshape(-1,1)
+                res_tr = t_tr - yhat_lgbm_tr
+                G_res, _, _ = train_cwgan_gp(X_tr, Cseq_tr, res_tr, X_va, Cseq_va, t_va, cfg['model']['gan'], y_scaler, device=device)
+                res_hat_te_s = predict_deep(G_res, X_te, Cseq_te, device).reshape(-1,1)
+                yhat_res_s = yhat_lgbm_te + res_hat_te_s
+                yhat_res = y_scaler.inverse_transform(yhat_res_s).ravel()
         eval_ar    = evaluate_predictions(y_true, ar_preds)
         eval_lstm  = evaluate_predictions(y_true, yhat_lstm)
         eval_gan   = evaluate_predictions(y_true, yhat_gan)
@@ -217,7 +224,6 @@ def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te
         return None, None
 with st.sidebar:
     st.title("Forecast Lab")
-    # --- Start of Patch 1 ---
     with st.expander("Data", expanded=True):
         today = date.today()
         min_allowed = date(1990, 1, 1)
@@ -229,7 +235,6 @@ with st.sidebar:
                                min_value=min_allowed, max_value=max_allowed).isoformat()
         seq_len= st.number_input("Lookback (seq_len)", min_value=20, max_value=240, value=60, step=5)
         tiny_mode = st.checkbox("Tiny range mode (auto shrink splits)", value=True)
-    # --- End of Patch 1 ---
     with st.expander("Features", expanded=False):
         feat_mode = st.selectbox("Feature Mode", ["real", "dummy"], index=0)
         news_csv  = st.text_input("Headlines CSV (Date, Title)", value="features/news_headlines.csv")
@@ -297,18 +302,21 @@ if run_btn:
     cond_df, cond_dim = assemble_conditional(cfg['features']['mode'], df, cfg['features'])
     idx = y_series.index.intersection(cond_df.index)
     y_series = y_series.loc[idx]; cond_df = cond_df.loc[idx]; df_aligned = df.loc[idx]
-    N = len(y_series); seq = int(cfg['data']['seq_len'])
-    # --- Start of Patch 5 & 8 ---
-    seq, tr, va, te = auto_splits_for_small_ranges(N, seq, tr_min=20, va_min=5, te_min=5)
+    
+    N = len(y_series)
+    seq = int(cfg['data']['seq_len'])
+    # tiny-range friendly splits
+    seq, tr, va, te = auto_splits_for_small_ranges(N, seq, min_train_seq=16, va_min=5, te_min=5)
     step = max(te, 3)
     cfg['data']['seq_len'] = seq
     cfg['splits'].update({"train_len": tr, "val_len": va, "test_len": te, "step": step})
-    if tr < 60:
+    # shorten training for tiny ranges
+    if (tr - seq) < 60:
         cfg["model"]["lstm"]["epochs"] = 12
         cfg["model"]["gan"]["epochs"] = 20
         cfg["model"]["lstm"]["early_stopping"] = 4
         cfg["model"]["gan"]["early_stopping"] = 6
-    # --- End of Patch 5 & 8 ---
+
     st.markdown(f'<div class="run-header">Ticker {ticker} | {start} → {end} | N={N} | splits (tr={tr}, va={va}, te={te})</div>', unsafe_allow_html=True)
     # --- Start of Patch 4 ---
     log_area = st.empty()
