@@ -374,17 +374,20 @@ if run_btn:
     
     N = len(y_series)
     seq = int(cfg['data']['seq_len'])
-    # tiny-range friendly splits
-    seq, tr, va, te = auto_splits_for_small_ranges(N, seq, min_train_seq=16, va_min=5, te_min=5)
+    # tie splits to the Tiny-range toggle
+    min_tr = 8 if tiny_mode else 16
+    va_min = 3 if tiny_mode else 5
+    te_min = 3 if tiny_mode else 5
+    seq, tr, va, te = auto_splits_for_small_ranges(N, seq, min_train_seq=min_tr, va_min=va_min, te_min=te_min)
     step = max(te, 3)
     cfg['data']['seq_len'] = seq
     cfg['splits'].update({"train_len": tr, "val_len": va, "test_len": te, "step": step})
-    # shorten training for tiny ranges
-    if (tr - seq) < 60:
-        cfg["model"]["lstm"]["epochs"] = 12
-        cfg["model"]["gan"]["epochs"] = 20
-        cfg["model"]["lstm"]["early_stopping"] = 4
-        cfg["model"]["gan"]["early_stopping"] = 6
+    # shorten training more when Tiny-range is on
+    if (tr - seq) < 60 or tiny_mode:
+        cfg["model"]["lstm"]["epochs"] = 8 if tiny_mode else 12
+        cfg["model"]["gan"]["epochs"] = 12 if tiny_mode else 20
+        cfg["model"]["lstm"]["early_stopping"] = 3 if tiny_mode else 4
+        cfg["model"]["gan"]["early_stopping"] = 4 if tiny_mode else 6
 
     st.markdown(f'<div class="run-header">Ticker {ticker} | {start} → {end} | N={N} | splits (tr={tr}, va={va}, te={te})</div>', unsafe_allow_html=True)
     # --- Start of Patch 4 ---
