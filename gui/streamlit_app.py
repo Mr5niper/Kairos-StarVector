@@ -115,15 +115,36 @@ def plot_firm_holdings(df_plot: pd.DataFrame, model_cols: List[str]):
         ))
     fig.update_layout(legend=dict(orientation="h"), height=500, margin=dict(l=0,r=0,t=10,b=0), hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
+def planet_price_traces(dates: pd.DatetimeIndex, close: pd.Series,
+                        planets: List[str], harmonics: List[int], deg_to_price: float):
+    astro = get_raw_planetary_positions(pd.DatetimeIndex(dates))
+    traces = []
+    avg = float(close.mean())
+    for i, pl in enumerate(planets):
+        deg = astro[pl].values.astype(float)
+        base = deg * float(deg_to_price)
+        offset = avg - float(base.mean())
+        color_cycle = ["#e74c3c","#f39c12","#8e44ad","#2980b9","#16a085","#c0392b"]
+        for h in harmonics:
+            y = base + offset + float(h)*360.0*float(deg_to_price)
+            traces.append(go.Scatter(
+                x=dates, y=y, mode="lines", name=f"{pl} h{h}",
+                line=dict(width=1, color=color_cycle[i % len(color_cycle)]),
+                opacity=0.45, showlegend=True
+            ))
+    return traces
 def plot_equity_curve(y_true: np.ndarray, preds_map: Dict[str, np.ndarray], tc_bps: float):
     fig = go.Figure()
     for name, yhat in preds_map.items():
-        bt = simple_long_short(y_true, yhat, tc_bps=tc)
-        net = np.where(yhat > 0, 1.0, -1.0) * y_true  # reused for cum
-        flips = (np.abs(np.diff(np.where(yhat > 0, 1.0, -1.0))) > 0).astype(float)
-        cost = np.concatenate([[0.0], flips * (tc_bps / 1e-4) / 1e4])
-        cum = np.cumprod(1 + (net - cost)) - 1
-        fig.add_trace(go.Scatter(x=np.arange(len(cum)), y=cum, mode="lines", name=f"{name} (Sharpe {bt['sharpe']:.2f})"))
+        bt = simple_long_short(y_true, yhat, tc_bps=tc_bps)
+        signal = np.where(yhat > 0, 1.0, -1.0)
+        gross = signal * y_true
+        flips = (np.abs(np.diff(signal)) > 0).astype(float)
+        cost = np.concatenate([[0.0], flips * (tc_bps / 1e4)])  # correct cost in returns space
+        net = gross - cost
+        cum = np.cumprod(1 + net) - 1
+        fig.add_trace(go.Scatter(x=np.arange(len(cum)), y=cum, mode="lines",
+                                 name=f"{name} (Sharpe {bt['sharpe']:.2f})"))
     fig.update_layout(legend=dict(orientation="h"), height=350, margin=dict(l=0, r=0, t=10, b=0))
     st.plotly_chart(fig, use_container_width=True)
 def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te, log_cb=None):
@@ -286,6 +307,11 @@ with st.sidebar:
         g_slope_scale = st.slider("1x1 slope scale", 0.10, 3.0, 1.0, 0.05, key="g_scale")
         g_both_dirs = st.checkbox("Fans both directions", True, key="g_both")
         g_add_verticals = st.checkbox("Verticals at alignments", True, key="g_v")
+        st.markdown("— Planetary price lines —")
+        g_show_astro = st.checkbox("Add planetary price lines", value=False, key="g_show_astro")
+        g_planets = st.multiselect("Planets (lines)", PLANETS, default=["MARS","JUPITER","SATURN"], key="g_planets")
+        g_harmonics = st.multiselect("Harmonics", [-2,-1,0,1,2], default=[-1,0,1], key="g_harm")
+        g_deg_to_price = st.number_input("Degree → Price scale", value=2.0, step=0.1, key="g_scale_deg")
     st.markdown("---")
     build_btn = st.button("🧱 Build Features Cache (Real Mode)")
     run_btn   = st.button("🚀 Run Benchmark")
@@ -506,6 +532,9 @@ if run_btn:
                 x=dates, open=df_price["Open"], high=df_price["High"], low=df_price["Low"], close=df_price["Close"],
                 increasing_line_color="#2ECC71", decreasing_line_color="#E74C3C"
             ))
+            if g_show_astro and g_planets:
+                for tr in planet_price_traces(dates, close, g_planets, g_harmonics, g_deg_to_price):
+                    fig.add_trace(tr)
             fig.update_layout(
                 height=760, margin=dict(l=0,r=0,t=24,b=0),
                 xaxis=dict(range=[dates[0], end_ext]),
