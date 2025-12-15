@@ -21,7 +21,10 @@ from stock_forecast.train_gan import train_cwgan_gp
 from stock_forecast.eval import evaluate_predictions
 from stock_forecast.metrics import diebold_mariano
 from stock_forecast.backtest import simple_long_short
-from stock_forecast.meta_labeling import build_meta_features, build_meta_labels, train_meta_clf, apply_meta_clf
+from stock_forecast.meta_labeling import (
+    build_meta_features, build_meta_labels,
+    safe_train_meta_clf, apply_meta_clf
+)
 from stock_forecast.gann_grid import build_overlay_shapes, PLANETS
 st.set_page_config(page_title="Market Forecast Lab", layout="wide")
 st.markdown("""
@@ -102,27 +105,16 @@ def to_index_from_logret(arr: np.ndarray, base: float = 100.0) -> np.ndarray:
     return float(base) * np.exp(np.cumsum(arr))
 def auto_splits_for_small_ranges(N: int, seq: int,
                                  tr_min: int = 20, va_min: int = 5, te_min: int = 5):
-    """
-    Pick seq, train, val, test so at least one window works even with tiny spans.
-    Guarantees: seq>=5, tr>=3, va>=3, te>=3 and tr+va+te+seq <= N.
-    """
-    # shrink seq if needed (leave room for tr/va/te)
     seq = max(5, min(seq, max(5, N // 4)))
     free = max(N - seq, 0)
-    # if still tiny, split 60/20/20 but respect minimums
     if free <= 0:
-        return 5, 3, 3, 3  # caller will catch and warn if N < 14
+        return 5, 3, 3, 3
     tr = max(tr_min, int(free * 0.6))
     va = max(va_min, int(free * 0.2))
     te = max(te_min, free - tr - va)
-    # if over-allocated, trim train first, then val
-    while (tr + va + te) > free and tr > tr_min:
-        tr -= 1
-    while (tr + va + te) > free and va > va_min:
-        va -= 1
-    while (tr + va + te) > free and te > te_min:
-        te -= 1
-    # last guard: if still too big, compress evenly and keep >=3 bars each
+    while (tr + va + te) > free and tr > tr_min: tr -= 1
+    while (tr + va + te) > free and va > va_min: va -= 1
+    while (tr + va + te) > free and te > te_min: te -= 1
     need = tr + va + te
     if need > free:
         spare = free
@@ -151,6 +143,7 @@ def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te
         test_len = len(y_te_raw)
         X_te = X_te[-test_len:]; Cseq_te = Cseq_te[-test_len:]; t_te = t_te[-test_len:]
         y_true = y_te_raw.ravel()
+        log(f"Window {window_id}: ARIMA …")
         ar_preds = []
         arr = y_tr_raw.copy()
         for i in range(len(y_te_raw)):
@@ -158,12 +151,16 @@ def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te
             ar_preds.append(yhat)
             arr = np.concatenate([arr, [y_te_raw[i]]])
         ar_preds = np.array(ar_preds)
+        log(f"Window {window_id}: LSTM (cond) …")
         lstm_model, _ = train_lstm(X_tr, Cseq_tr, t_tr, X_va, Cseq_va, t_va, cfg['model']['lstm'], y_scaler, device=device)
         yhat_lstm_s = predict_deep(lstm_model, X_te, Cseq_te, device)
         yhat_lstm = y_scaler.inverse_transform(yhat_lstm_s.reshape(-1,1)).ravel()
+        log(f"Window {window_id}: cWGAN-GP (cond) …")
         G, D, _ = train_cwgan_gp(X_tr, Cseq_tr, t_tr, X_va, Cseq_va, t_va, cfg['model']['gan'], y_scaler, device=device)
         yhat_gan_s = predict_deep(G, X_te, Cseq_te, device)
         yhat_gan = y_scaler.inverse_transform(yhat_gan_s.reshape(-1,1)).ravel()
+        # --- Start of Patch 7 (Meta) ---
+        log(f"Window {window_id}: Meta-Labeling …")
         yhat_gan_filtered = yhat_gan.copy()
         if cfg['meta_labeling']['enabled']:
             preds_val_s = predict_deep(G, X_va, Cseq_va, device)
@@ -172,12 +169,15 @@ def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te
             C_last_val = Cseq_va[:, -1, :]
             meta_X_val = build_meta_features(C_last_val, preds_val, returns_vol=None)
             meta_y_val = build_meta_labels(y_true_val, preds_val, abs_threshold=cfg['meta_labeling']['threshold_abs_pred'])
-            clf = train_meta_clf(meta_X_val, meta_y_val, cfg['meta_labeling']['lgbm_params'])
+            clf = safe_train_meta_clf(meta_X_val, meta_y_val, cfg['meta_labeling']['lgbm_params'])
             C_last_te = Cseq_te[:, -1, :]
             meta_X_te = build_meta_features(C_last_te, yhat_gan, returns_vol=None)
             yhat_gan_filtered, _ = apply_meta_clf(clf, meta_X_te, yhat_gan)
+        # --- End of Patch 7 (Meta) ---
+        # --- Start of Patch 7 (Residual) ---
         yhat_res = None
-        if cfg['model']['residual']['enabled']:
+        if cfg['model']['residual']['enabled'] and len(t_tr) >= 20:
+            log(f"Window {window_id}: Residual Fusion …")
             import lightgbm as lgb
             params = cfg['model']['residual']['lgbm_params']
             F_tr = get_cond_2d(X_tr, Cseq_tr); F_va = get_cond_2d(X_va, Cseq_va); F_te = get_cond_2d(X_te, Cseq_te)
@@ -190,6 +190,7 @@ def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te
             res_hat_te_s = predict_deep(G_res, X_te, Cseq_te, device).reshape(-1,1)
             yhat_res_s = yhat_lgbm_te + res_hat_te_s
             yhat_res = y_scaler.inverse_transform(yhat_res_s).ravel()
+        # --- End of Patch 7 (Residual) ---
         eval_ar    = evaluate_predictions(y_true, ar_preds)
         eval_lstm  = evaluate_predictions(y_true, yhat_lstm)
         eval_gan   = evaluate_predictions(y_true, yhat_gan)
@@ -297,46 +298,53 @@ if run_btn:
     idx = y_series.index.intersection(cond_df.index)
     y_series = y_series.loc[idx]; cond_df = cond_df.loc[idx]; df_aligned = df.loc[idx]
     N = len(y_series); seq = int(cfg['data']['seq_len'])
-    # --- Start of Patch 2 & 4 ---
-    tr_min = 10 if tiny_mode else 20
-    va_min = 3 if tiny_mode else 5
-    te_min = 3 if tiny_mode else 5
-    seq, tr, va, te = auto_splits_for_small_ranges(N, seq, tr_min=tr_min, va_min=va_min, te_min=te_min)
+    # --- Start of Patch 5 & 8 ---
+    seq, tr, va, te = auto_splits_for_small_ranges(N, seq, tr_min=20, va_min=5, te_min=5)
     step = max(te, 3)
     cfg['data']['seq_len'] = seq
     cfg['splits'].update({"train_len": tr, "val_len": va, "test_len": te, "step": step})
-    # --- End of Patch 2 & 4 ---
+    if tr < 60:
+        cfg["model"]["lstm"]["epochs"] = 12
+        cfg["model"]["gan"]["epochs"] = 20
+        cfg["model"]["lstm"]["early_stopping"] = 4
+        cfg["model"]["gan"]["early_stopping"] = 6
+    # --- End of Patch 5 & 8 ---
     st.markdown(f'<div class="run-header">Ticker {ticker} | {start} → {end} | N={N} | splits (tr={tr}, va={va}, te={te})</div>', unsafe_allow_html=True)
+    # --- Start of Patch 4 ---
+    log_area = st.empty()
+    def log(msg: str):
+        ts = pd.Timestamp.now().strftime("%H:%M:%S")
+        log_area.write(f"[{ts}] {msg}")
+    # --- End of Patch 4 ---
     progress_bar = st.progress(0, text="Preparing…")
     results_all, first_preds = [], None
     total_windows = sum(1 for _ in rolling_windows(N, seq, tr, va, te, step))
-    # --- Start of Patch 3 ---
+    # --- Start of Patch 6 ---
     if total_windows == 0:
-        # force a single tiny window
         if N < (seq + 9):
-            st.error(f"Need at least ~{seq+9} bars; you have {N}. Reduce lookback or widen dates.")
+            st.error(f"Need ~{seq+9} bars; you have {N}. Reduce lookback or widen dates.")
             st.stop()
-        tr_i = (0, tr)
-        va_i = (tr, tr + va)
-        te_i = (tr + va, tr + va + te)
-        wr, preds = run_window(df_aligned, y_series, cond_df, cfg, device, 1, tr_i, va_i, te_i)
+        tr_i = (0, tr); va_i = (tr, tr+va); te_i = (tr+va, tr+va+te)
+        wr, preds = run_window(df_aligned, y_series, cond_df, cfg, device, 1, tr_i, va_i, te_i, log_cb=log)
         if wr is None:
             st.error("Could not build a tiny window. Reduce lookback or widen dates.")
             st.stop()
-        results_all = [wr]
-        first_preds = preds
+        results_all = [wr]; first_preds = preds
         st.success("Completed 1 tiny window.")
     else:
         for w_id, (tr_i, va_i, te_i) in enumerate(rolling_windows(N, seq, tr, va, te, step), start=1):
             progress_bar.progress(int((w_id / total_windows) * 100), text=f"Window {w_id}/{total_windows}")
-            wr, preds = run_window(df_aligned, y_series, cond_df, cfg, device, w_id, tr_i, va_i, te_i)
-            if wr is None: continue
+            wr, preds = run_window(df_aligned, y_series, cond_df, cfg, device, w_id, tr_i, va_i, te_i, log_cb=log)
+            if wr is None: 
+                log(f"Window {w_id}: skipped due to error.")
+                continue
             wr["window"] = {"start": str(df_aligned.index[te_i[0]]), "end": str(df_aligned.index[te_i[1]-1])}
             results_all.append(wr)
             if first_preds is None: first_preds = preds
-    # --- End of Patch 3 ---
-    if total_windows > 0:
-        st.success(f"Completed {len(results_all)} windows.")
+    # --- End of Patch 6 ---
+    if total_windows > 0 or (total_windows == 0 and len(results_all) > 0):
+        if total_windows > 0:
+            st.success(f"Completed {len(results_all)} windows.")
     tabs = st.tabs(["Dashboard", "Predictions", "Gann/Fan Grid", "Features", "Windows", "Logs"])
     with tabs[0]:
         st.subheader("Averaged Performance")
