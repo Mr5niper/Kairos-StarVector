@@ -25,8 +25,10 @@ with st.sidebar:
 st.title("Gann/Fan + Planetary Overlay")
 if run:
     df = fetch_ohlc_yf(ticker, start=start, end=end).dropna()
+    ratios_map = {"1x8":1/8,"1x4":1/4,"1x3":1/3,"1x2":1/2,"1x1":1,"2x1":2,"3x1":3,"4x1":4,"8x1":8}
+    ratios = [ratios_map[r] for r in ["1x8","1x4","1x3","1x2","1x1","2x1","3x1","4x1","8x1"]] # Default ratios hardcoded in gann_app, assuming all used
     shapes = build_overlay_shapes(df.index, df["Close"], (pA,pB), aspects, orb,
-                                  int(anchors), [1/8,1/4,1/3,1/2,1,2,3,4,8],
+                                  int(anchors), ratios,
                                   float(scale), int(extend), bool(both), bool(verts), float(step))
     end_ext = df.index[-1] + pd.Timedelta(days=int(extend))
     fig = go.Figure()
