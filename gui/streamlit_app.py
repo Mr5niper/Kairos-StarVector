@@ -1,6 +1,6 @@
 # gui/streamlit_app.py
 import os, sys, traceback, io, json, time
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, List
 import numpy as np
 import pandas as pd
@@ -186,11 +186,18 @@ def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te
         return None, None
 with st.sidebar:
     st.title("Forecast Lab")
+    # --- Start of Patch 1 ---
     with st.expander("Data", expanded=True):
+        today = date.today()
+        min_allowed = date(1990, 1, 1)
+        max_allowed = date(2100, 1, 1)
         ticker = st.text_input("Ticker (Yahoo)", value="^GSPC")
-        start  = st.date_input("Start", value=datetime(2015,1,1)).isoformat()
-        end    = st.date_input("End", value=datetime.now().date()).isoformat()
+        start  = st.date_input("Start",  value=max(date(2015,1,1), date(today.year-1, today.month, min(today.day, 28))),
+                               min_value=min_allowed, max_value=max_allowed).isoformat()
+        end    = st.date_input("End",    value=today,
+                               min_value=min_allowed, max_value=max_allowed).isoformat()
         seq_len= st.number_input("Lookback (seq_len)", min_value=20, max_value=240, value=60, step=5)
+    # --- End of Patch 1 ---
     with st.expander("Features", expanded=False):
         feat_mode = st.selectbox("Feature Mode", ["real", "dummy"], index=0)
         news_csv  = st.text_input("Headlines CSV (Date, Title)", value="features/news_headlines.csv")
