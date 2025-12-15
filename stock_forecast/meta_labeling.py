@@ -10,6 +10,11 @@ def build_meta_labels(y_true: np.ndarray, preds: np.ndarray, abs_threshold: floa
     mask = (np.abs(preds) >= abs_threshold)
     labels = ((np.sign(preds) == np.sign(y_true)) & mask).astype(int)
     return labels
+def train_meta_clf(X_train: np.ndarray, y_train: np.ndarray, params: dict):
+    # original version, replaced by safe_train_meta_clf in logic below
+    clf = lgb.LGBMClassifier(**params, random_state=42)
+    clf.fit(X_train, y_train)
+    return clf
 def safe_train_meta_clf(X_train: np.ndarray, y_train: np.ndarray, params: dict):
     # skip if not enough data or only one class
     if X_train is None or len(X_train) < 5:
