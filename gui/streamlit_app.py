@@ -27,6 +27,8 @@ from stock_forecast.dataset import (
     fetch_ohlc_yf, make_target, assemble_conditional,
     scale_fit_transform, build_sequences
 )
+from stock_forecast.gann_grid import build_overlay_shapes, PLANETS
+from stock_forecast.dataset import get_raw_planetary_positions
 from stock_forecast.splits import rolling_windows
 from stock_forecast.models.arima import arima_forecast
 from stock_forecast.train_lstm import train_lstm
@@ -96,10 +98,27 @@ def plot_predictions(df_plot: pd.DataFrame, model_cols: List[str]):
         fig.add_trace(go.Scatter(x=df_plot["Date"], y=df_plot[col], mode="lines", name=col, line=dict(color=palette[i % len(palette)])))
     fig.update_layout(legend=dict(orientation="h"), height=450, margin=dict(l=0, r=0, t=10, b=0))
     st.plotly_chart(fig, use_container_width=True)
+def plot_firm_holdings(df_plot: pd.DataFrame, model_cols: List[str]):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df_plot["Date"], y=df_plot["True"], mode="lines", name="Market (True)",
+        line=dict(color="black", width=3)
+    ))
+    colors = ["rgba(14,118,168,0.40)","rgba(230,126,34,0.40)","rgba(39,174,96,0.40)",
+              "rgba(142,68,173,0.40)","rgba(192,57,43,0.40)"]
+    lines  = ["#0E76A8","#E67E22","#27AE60","#8E44AD","#C0392B"]
+    for i, col in enumerate(model_cols):
+        fig.add_trace(go.Scatter(
+            x=df_plot["Date"], y=df_plot[col], mode="lines", name=col,
+            stackgroup="one", line=dict(width=1, color=lines[i % len(lines)]),
+            fillcolor=colors[i % len(colors)]
+        ))
+    fig.update_layout(legend=dict(orientation="h"), height=500, margin=dict(l=0,r=0,t=10,b=0), hovermode="x unified")
+    st.plotly_chart(fig, use_container_width=True)
 def plot_equity_curve(y_true: np.ndarray, preds_map: Dict[str, np.ndarray], tc_bps: float):
     fig = go.Figure()
     for name, yhat in preds_map.items():
-        bt = simple_long_short(y_true, yhat, tc_bps=tc_bps)
+        bt = simple_long_short(y_true, yhat, tc_bps=tc)
         net = np.where(yhat > 0, 1.0, -1.0) * y_true  # reused for cum
         flips = (np.abs(np.diff(np.where(yhat > 0, 1.0, -1.0))) > 0).astype(float)
         cost = np.concatenate([[0.0], flips * (tc_bps / 1e-4) / 1e4])
@@ -254,6 +273,19 @@ with st.sidebar:
         enable_meta= st.checkbox("Enable Meta-Labeling", value=True)
     with st.expander("💸 Backtest", expanded=False):
         tc_bps = st.slider("Transaction cost (bps)", min_value=0.0, max_value=20.0, value=3.0, step=0.5)
+    with st.expander("🕸️ Gann/Fan Overlay", expanded=False):
+        enable_gann = st.checkbox("Enable overlay", value=False)
+        g_pA = st.selectbox("Planet A", PLANETS, index=2, key="g_pA")
+        g_pB = st.selectbox("Planet B", PLANETS, index=4, key="g_pB")
+        g_aspects = st.multiselect("Aspects (deg)", [0,30,45,60,90,120,135,144,150,180],
+                                   default=[0,60,90,120,180], key="g_aspects")
+        g_orb = st.slider("Orb (deg)", 0.5, 5.0, 2.0, 0.5, key="g_orb")
+        g_max_anchors = st.number_input("Max anchors", 1, 200, 24, 1, key="g_max")
+        g_extend = st.number_input("Extend days", 0, 365, 120, 10, key="g_ext")
+        g_price_step = st.number_input("Horizontal step (price units)", value=72.0, step=1.0, key="g_step")
+        g_slope_scale = st.slider("1x1 slope scale", 0.10, 3.0, 1.0, 0.05, key="g_scale")
+        g_both_dirs = st.checkbox("Fans both directions", True, key="g_both")
+        g_add_verticals = st.checkbox("Verticals at alignments", True, key="g_v")
     st.markdown("---")
     build_btn = st.button("🧱 Build Features Cache (Real Mode)")
     run_btn   = st.button("🚀 Run Benchmark")
@@ -345,7 +377,7 @@ if run_btn:
     # ---------------------------
     # Tabs: Dashboard / Predictions / Features / Windows / Logs
     # ---------------------------
-    tabs = st.tabs(["📊 Dashboard", "🔮 Predictions", "🧩 Feature Explorer", "📜 Windows", "📝 Logs"])
+    tabs = st.tabs(["📊 Dashboard", "🔮 Predictions", "🕸️ Gann/Fan Grid", "🧩 Feature Explorer", "📜 Windows", "📝 Logs"])
     # DASHBOARD
     with tabs[0]:
         st.subheader("Key Performance (Averaged across windows)")
@@ -437,14 +469,53 @@ if run_btn:
             if first_preds["y_res"] is not None:
                 df_plot["Residual"] = first_preds["y_res"]
             model_cols = [c for c in df_plot.columns if c not in ["Date","True"]]
-            plot_predictions(df_plot, model_cols)
+            use_holdings = st.checkbox("Show as Firm Holdings (stacked area)", value=True)
+            if use_holdings:
+                plot_firm_holdings(df_plot, model_cols)
+            else:
+                plot_predictions(df_plot, model_cols)
             st.download_button("Download first-window predictions CSV",
                                data=df_plot.to_csv(index=False).encode("utf-8"),
                                file_name="preds_first_window.csv", mime="text/csv")
         else:
             st.info("No predictions to show.")
-    # FEATURES
+    # GANN/FAN GRID
     with tabs[2]:
+        st.subheader("Price with Gann/Fan + Planetary Overlay")
+        if enable_gann:
+            df_price = df_aligned
+            dates = df_price.index
+            close = df_price["Close"]
+            shapes = build_overlay_shapes(
+                dates=dates,
+                close=close,
+                pair=(g_pA, g_pB),
+                aspects_deg=g_aspects,
+                orb_deg=float(g_orb),
+                max_anchors=int(g_max_anchors),
+                ratios=[1/8,1/4,1/3,1/2,1,2,3,4,8],
+                slope_scale=float(g_slope_scale),
+                extend_days=int(g_extend),
+                both_dirs=bool(g_both_dirs),
+                add_verticals=bool(g_add_verticals),
+                price_step=float(g_price_step),
+            )
+            end_ext = dates[-1] + pd.Timedelta(days=int(g_extend))
+            fig = go.Figure()
+            fig.add_trace(go.Candlestick(
+                x=dates, open=df_price["Open"], high=df_price["High"], low=df_price["Low"], close=df_price["Close"],
+                increasing_line_color="#2ECC71", decreasing_line_color="#E74C3C"
+            ))
+            fig.update_layout(
+                height=760, margin=dict(l=0,r=0,t=24,b=0),
+                xaxis=dict(range=[dates[0], end_ext]),
+                shapes=shapes, showlegend=False
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Enable overlay in the sidebar.")
+    # FEATURE EXPLORER
+    with tabs[3]:
         st.subheader("Feature Explorer (Aligned Conditional Features Cache)")
         cache_path = cfg['features']['cache_path']
         if os.path.exists(cache_path):
@@ -461,7 +532,7 @@ if run_btn:
         else:
             st.warning("No cached features found. Click 'Build Features Cache' first (Real Mode).")
     # WINDOWS
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("Window-by-Window Results")
         if results_all:
             rows = []
@@ -486,7 +557,7 @@ if run_btn:
         else:
             st.info("No runs yet.")
     # LOGS
-    with tabs[4]:
+    with tabs[5]:
         st.subheader("Run Logs")
         st.text("See the left 'run header' and progress for status during execution.\n")
         st.caption("This tab will be expanded to include model training logs, errors, and alerts in future iterations.")
