@@ -34,10 +34,10 @@ def round_price_levels(y: np.ndarray, step: float) -> List[float]:
     if step <= 0: return []
     ymin, ymax = float(np.nanmin(y)), float(np.nanmax(y))
     start = np.floor(ymin / step) * step
-    levels, v = [], start
+    out, v = [], start
     while v <= ymax:
-        levels.append(float(v)); v += step
-    return levels
+        out.append(float(v)); v += step
+    return out
 def _base_slope_1x1(dates: pd.DatetimeIndex, y: np.ndarray) -> float:
     if len(dates) < 2: return 0.0
     days = max((dates[-1] - dates[0]).days, 1)
@@ -74,10 +74,10 @@ def build_overlay_shapes(
     pair: Tuple[str, str] = ("VENUS","JUPITER"),
     aspects_deg: List[float] = [0,60,90,120,180],
     orb_deg: float = 2.0,
-    max_anchors: int = 24,
+    max_anchors: int = 36,
     ratios: List[float] = [1/8,1/4,1/3,1/2,1,2,3,4,8],
-    slope_scale: float = 1.0,
-    extend_days: int = 120,
+    slope_scale: float = 1.2,
+    extend_days: int = 180,
     both_dirs: bool = True,
     add_verticals: bool = True,
     price_step: float = 72.0
