@@ -73,6 +73,12 @@ st.markdown("""
 # ---------------------------
 # Helpers
 # ---------------------------
+@st.cache_data(show_spinner=False, max_entries=8)
+def _cached_planets(date_key: tuple):
+    idx = pd.to_datetime(list(date_key))
+    return get_raw_planetary_positions(pd.DatetimeIndex(idx))
+def _key_from_dates(dates: pd.DatetimeIndex) -> tuple:
+    return tuple(pd.DatetimeIndex(dates).strftime("%Y-%m-%d"))
 def predict_deep(model, X, C, device="cpu"):
     import torch
     model.eval()
@@ -117,7 +123,7 @@ def plot_firm_holdings(df_plot: pd.DataFrame, model_cols: List[str]):
     st.plotly_chart(fig, use_container_width=True)
 def planet_price_traces(dates: pd.DatetimeIndex, close: pd.Series,
                         planets: List[str], harmonics: List[int], deg_to_price: float):
-    astro = get_raw_planetary_positions(pd.DatetimeIndex(dates))
+    astro = _cached_planets(_key_from_dates(pd.DatetimeIndex(dates)))
     traces = []
     avg = float(close.mean())
     for i, pl in enumerate(planets):
@@ -147,6 +153,9 @@ def plot_equity_curve(y_true: np.ndarray, preds_map: Dict[str, np.ndarray], tc_b
                                  name=f"{name} (Sharpe {bt['sharpe']:.2f})"))
     fig.update_layout(legend=dict(orientation="h"), height=350, margin=dict(l=0, r=0, t=10, b=0))
     st.plotly_chart(fig, use_container_width=True)
+def to_index_from_logret(arr: np.ndarray, base: float = 100.0) -> np.ndarray:
+    arr = np.asarray(arr).ravel()
+    return float(base) * np.exp(np.cumsum(arr))
 def run_window(df_aligned, y_series, cond_df, cfg, device, window_id, tr, va, te, log_cb=None):
     def log(msg): 
         if log_cb: log_cb(msg)
@@ -495,6 +504,11 @@ if run_btn:
             if first_preds["y_res"] is not None:
                 df_plot["Residual"] = first_preds["y_res"]
             model_cols = [c for c in df_plot.columns if c not in ["Date","True"]]
+            use_index = st.checkbox("Convert to cumulative index (base=100)", value=True)
+            if use_index:
+                df_plot["True"] = to_index_from_logret(df_plot["True"].values)
+                for c in model_cols:
+                    df_plot[c] = to_index_from_logret(df_plot[c].values)
             use_holdings = st.checkbox("Show as Firm Holdings (stacked area)", value=True)
             if use_holdings:
                 plot_firm_holdings(df_plot, model_cols)
@@ -538,9 +552,11 @@ if run_btn:
             fig.update_layout(
                 height=760, margin=dict(l=0,r=0,t=24,b=0),
                 xaxis=dict(range=[dates[0], end_ext]),
-                shapes=shapes, showlegend=False
+                shapes=shapes, showlegend=g_show_astro
             )
             st.plotly_chart(fig, use_container_width=True)
+            html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+            st.download_button("Download overlay (HTML)", data=html, file_name="gann_overlay.html", mime="text/html")
         else:
             st.info("Enable overlay in the sidebar.")
     # FEATURE EXPLORER
