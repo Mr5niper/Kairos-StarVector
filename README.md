@@ -1,364 +1,353 @@
-# Kairos StarVector — README
+# Kairos StarVector
 
-A complete forecasting system with:
+**6.0.0** — MIT licensed.
 
-- Walk-forward, leakage-safe evaluation
-- Models:
-  - ARIMA (baseline)
-  - Conditional LSTM (DPA-optimized early stopping)
-  - Conditional WGAN-GP (stable cGAN; DPA-optimized early stopping)
-  - Residual Fusion (LightGBM + residual cWGAN-GP)
-  - Meta-labeling filter (LightGBM) to accept/reject GAN signals
-- Real conditional features:
-  - Astro (Skyfield): CSW/Bradley-like daily scores; Gann proximity proxy
-  - Event/Sentiment (RSS → Sentence-BERT + SinglePass + FinBERT)
-- Statistical significance: Diebold–Mariano tests (GAN vs LSTM, GAN vs ARIMA)
-- Confidence intervals over windows
-- Backtest (long/short with transaction costs)
-- GUI (Streamlit) and CLI modes
-- Optional: Optuna hyperparameter tuning across multiple windows
+A degree-space Gann grid. Planetary peak altitudes are plotted as points on a
+0–180 degree axis, Gann rays radiate from each point in all four directions,
+your stocks are overlaid as scaled curves, and every ray crossing is solved
+and tabulated. Because planetary positions are computable in both directions,
+crossings between a ray from a past point and a ray from a **future** point
+can be calculated today.
 
-MIT Licensed.
+Also included: an alignment-wave model, cycle detection, parameter calibration
+with held-out testing, and an optional neural benchmark.
 
 ---
 
-## 1) Install
+## Quick start
 
-```bash
-# Create and activate a virtualenv (optional but recommended)
-python -m venv venv
-# Windows PowerShell:
-.\venv\Scripts\Activate.ps1
-# macOS/Linux:
-source venv/bin/activate
-
-# Install dependencies (first run downloads models/ephemeris on demand)
-pip install -r requirements.txt
 ```
+START.bat
+```
+
+Creates a virtual environment, installs the pinned dependencies on first run
+only, and opens the app in your browser.
+
+```
+BUILD_EXE.bat
+```
+
+Produces `dist\Kairos-StarVector.exe`, a single file needing no Python on the
+target machine. Add `full` to bundle the machine-learning extras.
+
+Both require **exactly Python 3.13.12**, located through the `py` launcher so
+a different `python` on your PATH cannot interfere.
 
 ---
 
-## 2) Data Preparation (News / Features)
+## The Gann sky grid
 
-This framework can run in two modes:
+This is the first tab and the main event.
 
-- `features.mode: "real"` (default): Builds real conditional features from news + astro
-- `features.mode: "dummy"`: Uses synthetic features (for quick smoke tests)
+**The vertical axis is degrees, 0 at the bottom to 180 at the top.** Not
+price. Each dot is the chosen planet's peak altitude — its height at
+culmination, seen from your latitude — for one interval, sitting at its
+measured angle with no conversion applied.
 
-### Option A: Fetch News via RSS (recommended)
+**Dots appear at every interval across the whole displayed timeline**, past and
+future. Choose day, week, month, quarter or year. Nothing is sampled or
+skipped, because planetary positions are deterministic and cheap to compute.
 
-```bash
-# Fetch headlines from Reuters, CNBC, MarketWatch, Yahoo Finance RSS (broad coverage).
-python scripts/fetch_news_rss.py --out features/news_headlines.csv --start 2015-01-01 --end 2025-01-01
-```
+**Gann rays radiate from each dot in all four directions**: forward, backward,
+up and down. Every ray is drawn at the same width and opacity — a Gann line is
+a Gann line, and where price sits relative to it is the information.
 
-Expected CSV schema:
-```
-Date,Title
-2019-08-05,Markets tumble as trade tensions rise
-2019-08-05,Fed officials weigh rate cuts
-...
-```
+**Your stocks are overlaid**, scaled into the degree band by a ratio and offset
+you adjust until past movement lines up with the planetary geometry. Auto-fit
+gives a least-squares starting position.
 
-> Note: RSS coverage is limited by source feed history. For best results,
-> supply your own long-horizon news CSV with a daily `Date` and `Title`.
+**The red line is now.** Dots to the right of it are future positions, exact
+rather than forecast.
 
-### Option B: Use Your Own News File
+### Squaring the chart
 
-- Place a CSV at `features/news_headlines.csv` with columns `Date,Title`.
-- Ensure `Date` is ISO format (YYYY-MM-DD), consistent with the market’s localtz.
+The 1x1 rate is derived from the window width by default, which is what Gann
+meant by squaring a chart. This matters more than it sounds:
 
----
+| Window | 1x1 at a fixed 1°/day covers | Looks like |
+|---|---|---|
+| 4 months | 150% of chart width | gentle diagonal |
+| 2 years | 20% | steep |
+| 3 years | 14% | vertical |
 
-## 3) Build Conditional Features (Astro + Event/Sentiment)
+Same arithmetic, unusable at one scale and correct at the other. Squaring gives
+`180° ÷ window days`, so the 1x1 stays on the diagonal at any window length.
+Measured on a three-year window: median screen slope 1.00, exactly diagonal. A
+manual rate is available, with the squared value always shown beside it.
 
-```bash
-python scripts/build_features.py
-```
+Dots are cheap; rays are not. Every interval dot is always drawn, and a
+separate control limits how many emit rays, with a mode for choosing which —
+nearest now, future only, highest angle, or spread evenly.
 
-This will compute and cache daily features to `artifacts/cond_features_cache.csv`:
-- Price/Volatility context (ATR proxy, MA ratio, returns lag)
-- Astro (Skyfield): `astro_csw`, `astro_bradley`, `astro_gann_prox`
-- Event/Sentiment (SBERT + FinBERT): `event_heat`, `event_heat_neg`, `event_sentiment`
+### Crossings
 
-> First run will download:
-> - Skyfield DE421 ephemeris (~20MB)
-> - SBERT and FinBERT models (~hundreds of MB)
-> Ensure you have internet access on first run.
+Every ray pair is solved arithmetically in (day, degree) space and classified:
 
----
+| kind | meaning |
+|---|---|
+| `past-future` | one ray from a point behind us, one from a future point |
+| `future-future` | both ahead |
+| `past-past` | both behind |
 
-## 4) Run the GUI (Streamlit)
+`past-future` is the decision candidate and the reason backward rays exist. A
+future planetary position is exact today, so a ray cast back from it crosses
+already-happened geometry, and that crossing is computable now rather than in
+hindsight.
 
-```bash
-streamlit run gui/streamlit_app.py
-```
-
-What you get:
-- Left sidebar: data range, feature mode, news CSV path, astro aspect controls, model options (Residual, Meta), and transaction costs
-- Buttons:
-  - “Build Features Cache (Real Mode)” — compute and cache conditional features
-  - “Run Benchmark” — train and evaluate across rolling windows
-- Tabs:
-  - Dashboard (KPIs, model comparison table, equity curves)
-  - Predictions (interactive chart for first test window)
-  - Feature Explorer (visualize cached features)
-  - Windows (per-window metrics table)
-  - Logs (progress/info)
+Crossings clustering within a few days and degrees are grouped into confluence
+zones. One crossing of two lines is weak; a cluster of eight is what the method
+looks for. Zone markers are off by default on the chart and available in the
+table, which reads better.
 
 ---
 
-## 5) Run from CLI (Optional)
+## Other tabs
 
-If you prefer command-line:
+**Chart** — price with Gann fans anchored to swing pivots or alignment dates,
+Square of Nine levels, round-number grids, time counts, planetary price lines,
+plus an angle-analysis panel: market strength relative to the fan, the rule of
+all angles measured against a control, price clusters, retracements, squaring
+the range.
 
-```bash
+**Alignment wave** — the trickle-down model. Each planetary alignment emits an
+influence that decays forward through time; overlapping tails sum into a wave,
+projected past the last bar.
+
+**Statistics** — correlations and event studies with p-values that account for
+autocorrelation. The tab that decides whether anything else means anything.
+
+**Calibrate & forecast** — fit wave parameters on a training window, re-score on
+held-out data, compare against the same search run on phase-randomised prices,
+then project dated LONG / SHORT / FLAT positions forward.
+
+**Cycles** — periodogram of price on a calendar-day grid, dominant cycle
+detection, matched against measured synodic periods.
+
+**Calendar** — every aspect, station and ingress, past and future, with
+zodiacal positions and daily motion.
+
+**Forecast models** — optional. ARIMA, a conditional LSTM and a conditional
+WGAN-GP on walk-forward windows, against a persistence baseline.
+
+**Data** — the underlying series, exportable, plus environment details.
+
+---
+
+## Read this before trusting a number
+
+The program will show you correlations, hit rates and fits. Those numbers on
+their own are close to meaningless, for a reason worth understanding.
+
+Price and the planetary curves are both smooth and strongly autocorrelated.
+Correlate any two smooth series and you get a large number almost regardless of
+whether they are related — two independent random walks routinely correlate
+above 0.8. The textbook p-value assumes independent observations, so on data
+like this it is wrong by orders of magnitude.
+
+Every test therefore reports two p-values side by side:
+
+- **p (naive)** — the textbook calculation. Almost always tiny. Ignore it.
+- **p (surrogate)** — computed against series preserving your own data's power
+  spectrum and autocorrelation but carrying no relationship. This is the number
+  that means something.
+
+Measured examples from this codebase's own test suite, all run on a **pure
+random walk** with no connection to planetary geometry:
+
+| Test | Result | Honest comparison |
+|---|---|---|
+| Wave vs log price | naive p = 0.005 | surrogate p = 0.31 |
+| Cycle matcher | 7 of 8 cycles matched a synodic period within 5% | ~60 candidate periods exist, so a match is near-guaranteed |
+| Parameter search | 0.574 direction accuracy on train | 0.482 on test, median 0.498 across candidates |
+| Rule of all angles | 42.6% hit rate | 59.3% for a matched control |
+
+Every one of those looks like a discovery and is not. That is what the
+machinery is for.
+
+Two tools are built in for calibrating expectations:
+
+- **Offline demo data** — a synthetic random walk. Anything the analysis reports
+  here is your noise floor for the settings you are using.
+- **Reality check** — reruns every test against a phase-randomised copy of
+  *your* series, matching its volatility and autocorrelation exactly while
+  destroying any real relationship.
+
+None of this argues your hypothesis is wrong. It is the machinery for finding
+out, and it is deliberately hard to pass. A result that survives it deserves
+attention. One that does not was never there.
+
+### The one legitimate edge
+
+`signal_offset` in the calibration, and the backward rays in the sky grid, both
+read planetary values from the **future**. That is not lookahead cheating, and
+it is the only real structural advantage here: planetary positions are
+computable decades ahead, so future planetary values are genuinely known today
+in a way no price-derived indicator's ever are.
+
+Future *prices* are never read anywhere, in any module. Only planetary geometry
+is read ahead. Every position is also lagged one bar before it meets a return,
+so nothing is scored against a price it could not have been acted on.
+
+This program is analysis and visualisation software. It is not financial
+advice, and nothing in it is a recommendation to buy or sell anything.
+
+---
+
+## Which build do I want
+
+|  | Standard | `full` |
+|---|---|---|
+| Command | `BUILD_EXE.bat` | `BUILD_EXE.bat full` |
+| Size | ~350–450 MB | ~1.5–2.5 GB |
+| Startup | a few seconds | ~1 minute, every launch |
+| Everything except the neural benchmark | yes | yes |
+| Forecast models tab | no | yes |
+
+One-file executables re-extract their whole archive on every launch, so bundle
+size becomes startup time. The benchmark is not lost in the standard build —
+its source ships intact and runs from a source install:
+
+```
+START.bat ml
 python scripts/run_benchmark.py
 ```
 
-Aggregated metrics saved to:
-```
-artifacts/summary.json
-```
+---
 
-Per-window predictions saved to:
+## Command-line tools
+
 ```
-artifacts/preds_window_<n>.csv
+python scripts/upcoming_alignments.py --days 365 --orb 1.5
+python scripts/upcoming_alignments.py --bodies JUPITER SATURN --csv out.csv
+python scripts/build_features.py --ticker SPY --start 2010-01-01
+python scripts/run_benchmark.py --epochs 40 --windows 4      # needs ML extras
+python scripts/fetch_news_rss.py                             # needs ML extras
 ```
 
 ---
 
-## 6) Configuration (configs/default.yaml)
+## Project layout
 
-Key sections:
-
-```yaml
-data:
-  ticker: "^GSPC"          # Yahoo symbol
-  start: "2015-01-01"
-  end: null
-  seq_len: 60
-  target: "log_return"
-
-features:
-  mode: "real"             # "real" uses RSS+SBERT+FinBERT+Skyfield; "dummy" uses synthetic
-  news_csv_path: "features/news_headlines.csv"
-  news_date_col: "Date"
-  news_text_col: "Title"
-  singlepass_threshold: 0.72
-  aspect_orb_deg: 3.0
-  aspects_deg: [0, 60, 90, 120, 180]
-  cache_path: "artifacts/cond_features_cache.csv"
-
-splits:
-  train_len: 756           # ~3y
-  val_len: 126             # ~6m
-  test_len: 126            # ~6m
-  step: 126
-
-model:
-  lstm: { val_metric: "DPA", ... }
-  gan:  { val_metric: "DPA", ... }
-  residual:
-    enabled: true
-
-meta_labeling:
-  enabled: true
-
-ablation:
-  residual_compare: true
-  meta_compare: true
 ```
+kairos/                  the engine, no heavy dependencies
+  skygrid.py             degree-space grid, peak altitudes, radiating rays,
+                         ray intersections, confluence zones
+  astro.py               longitudes, aspects, stations, ingresses,
+                         synodic periods, harmonic indices
+  waves.py               trickle-down composite, cycle detection,
+                         surrogate and permutation significance tests
+  calibrate.py           parameter search with train/test separation,
+                         null model, forward signal projection
+  gann.py                Square of Nine, fans, pivots, time counts,
+                         angle state, rule of all angles, clusters
+  market.py              price loading, caching, offline fallback
+  charting.py            Plotly figure builders
+  paths.py               resource paths for source and frozen runs
+
+gui/app.py               the Streamlit application
+kairos_app.py            launcher, used by START.bat and the exe
+
+stock_forecast/          optional ML benchmark
+  pipeline.py            feature assembly and walk-forward evaluation
+  models/                ARIMA, conditional LSTM, conditional WGAN-GP
+  train_lstm.py          training with early stopping on direction accuracy
+  train_gan.py           WGAN-GP training, noise-averaged prediction
+  metrics.py             errors, direction accuracy, Diebold-Mariano
+  backtest.py            long/short with costs and lagged signals
+  meta_labeling.py       signal accept/reject filter
+  splits.py              walk-forward window generation
+
+scripts/                 command-line entry points
+configs/default.yaml     defaults for the scripts
+requirements.txt         pinned runtime dependencies
+requirements-ml.txt      pinned optional ML extras
+Kairos-StarVector.spec   PyInstaller build recipe
+BUILD_EXE.bat            build the executable
+START.bat                run from source
+CHANGES.md               full changelog
+```
+
+Runtime output goes to `data/cache/` (price data, so the app works offline
+after the first fetch) and `artifacts/` (script results). Both sit next to the
+executable when frozen.
 
 ---
 
-## 7) How It Works
+## Notes on the astronomy
 
-- **Real conditional features**:
-  - **Astro**: Compute daily planetary longitudes (Skyfield), aggregate aspect alignments (CSW-like), cos(separation) sums (Bradley-like), proximity to round-number “Gann” price grid
-  - **Event/Sentiment**: Aggregate daily news titles via SBERT embeddings into topic clusters (SinglePass), evaluate sentiment using FinBERT, compute daily `event_heat`, `event_heat_neg`, `event_sentiment`
-- **Models**:
-  - **ARIMA** on raw returns
-  - **LSTM (Cond)** optimized for **DPA** (direction sign accuracy), early stopping on val DPA
-  - **cWGAN-GP (Cond)** stabilized on returns; early stopping on val DPA
-  - **Residual Fusion**: LightGBM on last-step features + cWGAN-GP on residuals
-  - **Meta-Labeling**: LightGBM classifier filters GAN trades based on features + predicted return
-- **Evaluation**:
-  - RMSE, MAE, MAPE, DPA
-  - Diebold–Mariano tests (GAN vs LSTM, GAN vs ARIMA)
-  - 95% CI on aggregated metrics
-- **Backtest**:
-  - Long if pred > 0, otherwise short
-  - Transaction costs applied on signal flips (bps)
+Positions come from **PyEphem**, which embeds VSOP87 for the planets and the
+Chapront lunar theory directly in its compiled extension. No data files, no
+network access, accurate to a few arc-seconds — orders of magnitude finer than
+the orbs any aspect study uses.
+
+This replaced Skyfield, which requires the DE421 kernel downloaded from NASA on
+first run. Workable from source, impossible in a one-file executable where the
+download lands in a temp directory wiped on exit and PyInstaller cannot see the
+file at build time.
+
+**Peak altitude** uses the standard relation for a body's highest point:
+
+```
+alt_max = 90 - |latitude - declination|
+```
+
+Verified against PyEphem's own observer transit calculation to within 0.04
+degrees, and it reproduces the textbook solstice altitudes: at latitude 47.8
+the Sun peaks at 65.62° in June and 18.75° in December.
+
+Both frames are available. **Geocentric** is what Gann and astrologers used.
+**Heliocentric** is what the Bradley siderograph uses, with Earth replacing the
+Sun.
+
+Synodic periods are measured from long-baseline mean motions rather than from
+your loaded date range, and verify against published values:
+
+| Pair | Computed | Published |
+|---|---|---|
+| Moon–Sun | 29.53 d | 29.53 d |
+| Mercury–Earth | 115.88 d | 115.88 d |
+| Venus–Jupiter | 236.99 d | 236.99 d |
+| Sun–Jupiter | 398.90 d | 398.88 d |
+| Mars–Jupiter | 816.42 d | 816.4 d |
+| Jupiter–Saturn | 7253.98 d | 7253.5 d |
+| Saturn–Uranus | 16561 d | 16568 d |
+
+Pairs involving the Moon are computed geocentrically, the rest
+heliocentrically. That split is necessary rather than stylistic — the Sun and
+Mercury share a mean *geocentric* motion, so their relative longitude never
+accumulates and a geocentric calculation diverges instead of returning 116
+days.
 
 ---
 
-## 8) Quick Start (TL;DR)
+## Troubleshooting
 
-```bash
-# 1) Install
-pip install -r requirements.txt
+**"Python 3.13 was not found via the py launcher."** Install Python 3.13.12 and
+enable the py launcher during setup. The build refuses other versions because
+the pinned wheels are the CPython 3.13 Windows builds.
 
-# 2) Fetch news (RSS) – optional if you already have features/news_headlines.csv
-python scripts/fetch_news_rss.py --out features/news_headlines.csv --start 2015-01-01 --end 2025-01-01
+**Every ray looks vertical.** The 1x1 rate is set manually and is too steep for
+the window. Switch the 1x1 rate to "square the chart".
 
-# 3) Build features (astro + event)
-python scripts/build_features.py
+**The chart is an opaque lattice.** In order: reduce "dots that emit rays", set
+a ray length instead of unlimited, remove ray ratios, turn off fast ratios.
 
-# 4) GUI
-streamlit run gui/streamlit_app.py
+**Build fails partway through.** Usually antivirus locking a file in `build\` or
+`dist\`. Add the project folder to your exclusions, or delete `venv\` and rerun.
 
-# OR: CLI
-python scripts/run_benchmark.py
-```
+**Exe takes a long time to start.** Expected for one-file builds — the archive
+extracts on every launch. Run from source with `START.bat` if startup time
+matters.
 
----
+**"No data returned for ..."** Check the symbol on Yahoo Finance directly.
+Indices need a caret: `^GSPC`. Futures use `=F`: `GC=F`. Crypto uses a dash:
+`BTC-USD`. If the network is unavailable the app falls back to cached data, and
+offline demo mode always works.
 
-## 9) Tips for Speed / First Run
+**Blank white page in the browser.** The server started but the frontend assets
+are missing, meaning the build did not collect Streamlit's static files.
+Rebuild with `BUILD_EXE.bat`, which uses the spec file that handles it.
 
-- First run downloads models (SBERT, FinBERT) and ephemeris (Skyfield).
-- To test pipeline quickly:
-  - Set `features.mode: "dummy"`
-  - Narrow `data.start` (e.g., last 2–3 years)
-  - Disable `residual.enabled` and `meta_labeling.enabled`
-  - Reduce `model.*.epochs`
-- GPU recommended (PyTorch) for faster deep model training.
-
----
-
-## 10) Tuning (Optional; Multi-Window)
-
-```bash
-# Enable in configs/default.yaml:
-tuning:
-  enable: true
-  n_trials: 30
-  windows: 3
-  target_metric: "DPA"
-
-# Run Optuna
-python scripts/run_optuna.py
-```
-
-This tunes LSTM/GAN hyperparams by maximizing average DPA across multiple walk-forward windows.
-
----
-
-## 11) Troubleshooting
-
-- **“No valid news parsed”**: Use `scripts/fetch_news_rss.py` or supply your own `features/news_headlines.csv`.
-- **Skyfield ephemeris not found**: Program downloads ephemeris on first run. Ensure internet access.
-- **HuggingFace model download fails**: Check firewall/proxy settings; you can pre-download models.
-- **Memory issues (GPU)**: Reduce `batch_size`, `epochs`, or switch `device` to CPU.
-
----
-
-## 12) Folder Structure
-
-```
-.
-├─ configs/
-│  └─ default.yaml
-├─ features/
-│  └─ news_headlines.csv         # daily headlines (Date, Title)
-├─ artifacts/
-│  ├─ cond_features_cache.csv    # daily conditional features (built)
-│  ├─ preds_window_*.csv         # per-window predictions
-│  └─ summary.json               # aggregated metrics
-├─ stock_forecast/
-│  ├─ dataset.py                 # astro & event pipelines; scaling; sequences
-│  ├─ models/ (arima, lstm, cgan)
-│  ├─ train_lstm.py              # DPA early stopping
-│  ├─ train_gan.py               # DPA early stopping + best checkpoint
-│  ├─ meta_labeling.py           # meta filter
-│  ├─ backtest.py, eval.py, metrics.py, splits.py, utils.py
-├─ scripts/
-│  ├─ build_features.py          # builds & caches conditional features
-│  ├─ fetch_news_rss.py          # RSS news fetcher (Date, Title)
-│  ├─ run_benchmark.py           # CLI evaluation
-│  └─ run_optuna.py              # hyperparameter tuning
-└─ gui/
-   └─ streamlit_app.py           # pro GUI
-```
-
----
-
-## 13) License
-
-MIT
-
----
-
-## 14) Credits
-
-- FinBERT: ProsusAI/finbert
-- Sentence-BERT: sentence-transformers/all-MiniLM-L6-v2
-- Skyfield: NASA/JPL ephemerides
-- Inspired by CCIR best practices (conditional models, event-aware signals) and SOTA WGAN‑GP stability for time series.
-```
-```markdown
-# QUICKSTART.md
-
-## 1) Install
-
-```bash
-python -m venv venv
-# Windows:
-.\venv\Scripts\Activate.ps1
-# macOS/Linux:
-source venv/bin/activate
-
-pip install -r requirements.txt
-```
-
-## 2) Fetch News (RSS)
-
-```bash
-python scripts/fetch_news_rss.py --out features/news_headlines.csv --start 2015-01-01 --end 2025-01-01
-```
-
-## 3) Build Features (Astro + Event/Sentiment)
-
-```bash
-python scripts/build_features.py
-```
-
-This writes: `artifacts/cond_features_cache.csv`.
-
-## 4) Run GUI
-
-```bash
-streamlit run gui/streamlit_app.py
-```
-
-- Configure ticker/date range/features in the sidebar.
-- Click “Build Features Cache (Real Mode)” if not already cached.
-- Click “Run Benchmark”.
-
-## 5) Results
-
-- Aggregated metrics: `artifacts/summary.json`
-- Per-window predictions: `artifacts/preds_window_*.csv`
-- GUI tabs include KPIs, model comparison, equity curves, feature explorer, window tables, logs.
-
-## 6) Optional CLI
-
-```bash
-python scripts/run_benchmark.py
-```
-
-## 7) Optional Tuning (Multi-Window Optuna)
-
-```bash
-# In configs/default.yaml: tuning.enable: true
-python scripts/run_optuna.py
-```
-
-## 8) Notes
-
-- First run downloads FinBERT/SBERT and Skyfield ephemeris (internet required).
-- To test quickly: set `features.mode: "dummy"` in config, reduce date range and epochs.
-- Meta-labeling and Residual Fusion can be toggled in sidebar/ YAML.
-
-
-MIT License.
+**Statistics tab is slow.** Surrogate and permutation tests are the cost of
+honest p-values. Lower the iteration counts while exploring, raise them for a
+result you intend to rely on.

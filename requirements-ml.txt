@@ -1,0 +1,55 @@
+# =============================================================================
+#  Kairos StarVector - OPTIONAL machine-learning extras
+#  Target: Python 3.13.12 on Windows x64
+# =============================================================================
+#  Only needed for the "Forecast models" tab and scripts/run_benchmark.py.
+#  The chart, the alignment wave, the statistics and the cycle analysis all
+#  run without any of this installed.
+#
+#  Install AFTER requirements.txt:
+#      pip install -r requirements.txt
+#      pip install -r requirements-ml.txt
+#
+#  Size warning, because it is easy to be caught out by it: the default PyPI
+#  torch wheel for Windows bundles the CUDA runtime and comes to roughly
+#  2.5 GB installed. With no NVIDIA GPU there is no reason to carry it.
+#  Install the CPU-only wheel first (about 250 MB) and pip will then treat
+#  the torch requirement below as already satisfied:
+#
+#      pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+#      pip install -r requirements-ml.txt
+#
+#  A NOTE ON PINNING, which differs from requirements.txt on purpose.
+#  Only the direct dependencies are pinned here. Their transitive
+#  dependencies are left to pip, because this corner of the tree carries
+#  tight internal caps that shift with every release: transformers 5.15
+#  requires tokenizers<=0.23.0, and the only published build in that family
+#  is now 0.23.1. Pinning a transitive package inside a moving constraint
+#  like that does not freeze the install, it breaks it outright with an
+#  unresolvable conflict. requirements.txt pins deeply because that tree is
+#  stable and it is what goes into the executable; this one does not.
+# =============================================================================
+
+# --- Deep learning ------------------------------------------------------
+torch==2.13.0
+
+# --- Gradient boosting and classical models ----------------------------
+lightgbm==4.7.0
+statsmodels==0.14.6
+scikit-learn==1.9.0
+
+# --- Hyperparameter search ---------------------------------------------
+optuna==4.9.0
+
+# --- News sentiment (optional within the optional) ---------------------
+#  Used only by scripts/fetch_news_rss.py and the event_sentiment feature.
+#  FinBERT is about 440 MB and MiniLM about 90 MB, downloaded from Hugging
+#  Face on first use. Skip this block entirely if you do not want the
+#  sentiment feature: stock_forecast/pipeline.py detects its absence and
+#  continues with the astronomical features alone rather than failing.
+transformers==5.15.0
+sentence-transformers==5.7.0
+feedparser==6.0.14
+
+# --- Shared -------------------------------------------------------------
+tqdm==4.70.0

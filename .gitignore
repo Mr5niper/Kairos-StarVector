@@ -1,0 +1,25 @@
+# Build artefacts
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Environments
+venv/
+.venv/
+env/
+
+# Runtime output
+data/cache/
+artifacts/
+exports/
+features/*.csv
+!features/.gitkeep
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

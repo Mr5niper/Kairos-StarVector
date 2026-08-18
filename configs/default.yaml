@@ -1,89 +1,162 @@
-# configs/default.yaml
+# =============================================================================
+#  Kairos StarVector - default configuration
+# =============================================================================
+#  The GUI does not read this file: its sidebar is the source of truth for
+#  an interactive session. This is for the command-line scripts under
+#  scripts/, and as a record of sensible starting values.
+#
+#  Drop an edited copy next to the executable in configs/default.yaml and it
+#  will be picked up in preference to the bundled one.
+# =============================================================================
+
 seed: 42
 
 data:
-  ticker: "^GSPC"          # e.g., "^GSPC", "AAPL", "BTC-USD"
-  start: "2000-01-01"
-  end: null
-  seq_len: 60
-  target: "log_return"     # "log_return" or "close_delta"
+  ticker: "^GSPC"        # any Yahoo symbol: ^GSPC, SPY, AAPL, GC=F, BTC-USD
+  start: "2015-01-01"
+  end: null              # null means today
+  interval: "1d"         # 1d, 1wk, 1mo
 
-features:
-  mode: "real"             # <- USE REAL PIPELINE (Skyfield + FinBERT + SBERT)
-  news_csv_path: "features/news_headlines.csv"  # CSV with Date, Title
-  news_date_col: "Date"
-  news_text_col: "Title"
-  news_tz: "US/Eastern"
-  singlepass_threshold: 0.72
-  aspect_orb_deg: 3.0
-  aspects_deg: [0, 60, 90, 120, 180]
-  cache_path: "artifacts/cond_features_cache.csv"
+skygrid:
+  # The primary chart. Vertical axis is degrees, not price.
+  bodies: ["MARS"]           # one planet keeps the grid readable
+  latitude: 47.8             # peak altitude depends on where you stand
+  interval: "month"          # day, week, month, quarter, year
+  measure: "peak altitude"   # or "declination"
+  domain: [0, 180]           # what the chart height represents, in degrees
 
-splits:
-  train_len: 756
-  val_len: 126
-  test_len: 126
-  step: 126
+  # null squares the chart to the window: 180 / window_days. A fixed rate
+  # cannot work at every window length - 1 deg/day is a gentle diagonal over
+  # four months and vertical over three years.
+  deg_per_day: null
+
+  ray_ratios: ["1x2", "1x1", "2x1"]
+  ray_length_days: null      # null runs each ray to the 0 or 180 boundary
+  ray_origins: 8             # how many dots emit rays; all dots are drawn
+  ray_origin_mode: "nearest now"   # future only, highest angle, spread evenly
+  forward_rays: true
+  backward_rays: true
+  include_fast_ratios: false # steepest ratios cross 180 deg in days
+  future_days: 180           # projection past the window, set separately
+  dot_size: 9
+  mark_confluence: false     # cluttered on the chart, useful in the table
+  autofit_stock: true        # least squares ratio and offset
+
+astro:
+  # geocentric is what Gann and astrologers used.
+  # heliocentric is what the Bradley siderograph uses; EARTH replaces SUN.
+  frame: "geocentric"
+  bodies: ["SUN", "VENUS", "MARS", "JUPITER", "SATURN", "URANUS", "NEPTUNE"]
+
+  # Aspect angles counted as alignments. 0/90/120/180 are the major ones.
+  # Add 45 and 135 for the Gann eighth-harmonics, or 144 for the fifth.
+  aspects_deg: [0, 90, 120, 180]
+
+  # Half-width of the window treated as an aspect. Wider finds more events
+  # but each carries less weight, and past about 5 degrees a slow pair is
+  # in orb almost permanently, which drowns out everything else.
+  orb_deg: 2.0
+
+  # Minimum days between two events from the same pair and aspect, so one
+  # slow transit does not register as a hundred separate alignments.
+  min_separation_days: 3
+
+  # The Moon is available but off by default: it completes an aspect cycle
+  # every couple of days, so including it produces thousands of events that
+  # swamp every slower pair in the statistics.
+  include_moon: false
+
+wave:
+  # The trickle-down model. Each alignment emits an influence that decays
+  # forward in time; overlapping tails sum into a wave.
+  tau_days: 30           # influence falls to 37% after this many days
+  horizon_days: 180      # how far forward one event is allowed to reach
+  lead_days: 0           # anticipation before the event, if any
+  oscillate: false       # add a cosine to the tail
+  oscillation_period: 90
+  oscillation_phase_deg: 0
+  weighting: "strength"  # "strength" or "equal"
+
+gann:
+  fan_ratios: ["1x2", "1x1", "2x1"]
+
+  # The 1x1 unit is price movement per calendar day. "auto" uses the median
+  # absolute daily change over the last year.
+  #
+  # Deliberately not derived from (price range / days in view), which is
+  # what the old build did: that makes the angle depend on your date picker,
+  # so the same market drew different fans at different zoom levels.
+  unit_price_per_day: "auto"
+
+  pivot_window: 21       # bars each side; 21 finds monthly swings, 63 quarterly
+  max_fan_anchors: 5
+  both_directions: true
+  extend_days: 180
+
+  square_of_nine:
+    enabled: true
+    base: "last_close"   # last_close, lowest_low, or a number
+    degrees: [45, 90, 135, 180, 225, 270, 315, 360]
+    rotations: 2
+
+  round_number_step: 0.0 # 0 disables the round-number grid
+  time_cycles: false
+  time_cycle_degrees: [90, 180, 270, 360]
+
+statistics:
+  # Iterations for the phase-randomised surrogate test. More is slower and
+  # gives a finer p-value; 300 resolves down to about p = 0.003.
+  n_surrogates: 300
+
+  # Permutations for the event study.
+  n_permutations: 500
+
+  max_lag_days: 120
+  event_horizons: [1, 3, 5, 10, 21]
 
 model:
+  # Everything below needs requirements-ml.txt installed.
+  seq_len: 60
+  target: "log_return"
+
   lstm:
     hidden: 64
     layers: 2
     dropout: 0.1
-    epochs: 80
+    epochs: 40
     batch_size: 64
     lr: 1.0e-3
-    early_stopping: 8
+    early_stopping: 6
     val_metric: "DPA"
 
   gan:
     hidden: 64
     layers: 2
     dropout: 0.1
-    epochs: 120
+    epochs: 60
     batch_size: 64
     lr_g: 2.0e-4
     lr_d: 2.0e-4
     betas_g: [0.5, 0.9]
     betas_d: [0.5, 0.9]
-    crit_steps: 5
+    crit_steps: 3        # critic updates per generator step
     lambda_gp: 10.0
-    early_stopping: 12
+    early_stopping: 8
     val_metric: "DPA"
+    predict_samples: 32  # noise draws averaged for a point forecast
 
-  residual:
-    enabled: true
-    lgbm_params:
-      n_estimators: 500
-      max_depth: 4
-      learning_rate: 0.05
-      subsample: 0.9
-      colsample_bytree: 0.9
-
-meta_labeling:
-  enabled: true
-  threshold_abs_pred: 0.0
-  lgbm_params:
-    n_estimators: 300
-    max_depth: 3
-    learning_rate: 0.05
-    subsample: 0.9
-    colsample_bytree: 0.9
-
-ablation:
-  residual_compare: true
-  meta_compare: true
-
-eval:
-  metrics: ["RMSE","MAE","MAPE","DPA"]
-  out_dir: "artifacts"
-  save_predictions: true
+splits:
+  # null lets the code size the splits to the data. The old hard-coded
+  # train_len of 756 bars meant any range under about four years produced
+  # zero windows, and the GUI then crashed in its own fallback branch.
+  auto: true
+  train_len: null
+  val_len: null
+  test_len: null
 
 backtest:
-  tc_bps: 3.0
+  tc_bps: 3.0            # round-trip cost in basis points on each flip
 
-tuning:
-  enable: false
-  n_trials: 30
-  windows: 3
-  target_metric: "DPA"
+eval:
+  out_dir: "artifacts"
+  save_predictions: true
