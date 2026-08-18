@@ -1,88 +1,132 @@
-:: start.bat
-:: One-click launcher (safe & minimal). Put in project root (same folder as requirements.txt and gui\streamlit_app.py)
-
 @echo off
-setlocal
-cls
+setlocal enabledelayedexpansion
 
-REM --- Move to project root (this file's folder) ---
+:: ==========================================================================
+::  Kairos StarVector  --  run from source
+::  Strictly requires Python 3.13.12
+::
+::  Sets up the venv if needed, installs the pinned dependencies, and starts
+::  the app. Use this for development, or if you would rather not build an
+::  exe at all: it starts faster than the one-file build, because nothing
+::  has to be unpacked.
+::
+::  Usage:
+::     START.bat          Start the app.
+::     START.bat ml       Also install the machine-learning extras first.
+::     START.bat reset    Delete the venv and rebuild it from scratch.
+:: ==========================================================================
+
+set "REQUIRED_PYTHON_VERSION=3.13.12"
+set "PYTHON_DOWNLOAD_URL=https://www.python.org/downloads/release/python-31312/"
+set "PY=py -3.13"
+
+set "MODE=run"
+if /i "%~1"=="ml" set "MODE=ml"
+if /i "%~1"=="reset" set "MODE=reset"
+
 cd /d "%~dp0"
 
-REM --- Find Python ---
-where py >nul 2>&1
-if %ERRORLEVEL%==0 (
-  set "PY_CMD=py -3"
-) else (
-  where python >nul 2>&1
-  if %ERRORLEVEL%==0 (
-    set "PY_CMD=python"
-  ) else (
-    echo [start] ERROR: Python 3 not found on PATH. Install Python first.
-    pause
-    exit /b 1
-  )
-)
+echo ==========================================================================
+echo   Kairos StarVector
+echo ==========================================================================
 
-REM --- Create venv if missing ---
-if not exist "venv\Scripts\python.exe" (
-  echo [start] Creating virtualenv...
-  %PY_CMD% -m venv venv
-  if errorlevel 1 (
-    echo [start] ERROR: Could not create virtualenv.
-    pause
-    exit /b 1
-  )
-)
-
-REM --- Use venv Python ---
-set "VENV_PY=%CD%\venv\Scripts\python.exe"
-
-REM --- Install/upgrade dependencies ---
-echo [start] Installing dependencies...
-"%VENV_PY%" -m pip install --upgrade pip
-if errorlevel 1 goto pipfail
-
-"%VENV_PY%" -m pip install -r requirements.txt
-if errorlevel 1 goto pipfail
-
-REM --- Make local package importable ---
-"%VENV_PY%" -m pip install -e .
-REM If editable install fails, we will fall back to PYTHONPATH
+:: --- Python check --------------------------------------------------------
+%PY% --version >nul 2>&1
 if errorlevel 1 (
-  echo [start] WARNING: Editable install failed, using PYTHONPATH fallback.
-  set "PYTHONPATH=%CD%"
+    echo [ERROR] Python 3.13 not found via the py launcher.
+    echo         Install Python %REQUIRED_PYTHON_VERSION% from:
+    echo         %PYTHON_DOWNLOAD_URL%
+    start "" "%PYTHON_DOWNLOAD_URL%"
+    goto :error
 )
 
-REM --- Ensure features folder exists and has a headlines CSV ---
-if not exist "features" mkdir features
-if not exist "features\news_headlines.csv" (
-  echo [start] No news_headlines.csv found; creating a tiny placeholder...
-  >features\news_headlines.csv echo Date,Title
-  >>features\news_headlines.csv echo 2020-01-02,Markets mixed amid uncertainty
+for /f "tokens=2 delims= " %%v in ('%PY% --version 2^>^&1') do set "FOUND=%%v"
+if not "!FOUND!"=="%REQUIRED_PYTHON_VERSION%" (
+    echo [WARN] Found Python !FOUND!, expected %REQUIRED_PYTHON_VERSION%.
+    echo        The pinned wheels target 3.13. Continuing, but if the install
+    echo        fails, this is why.
+    echo.
 )
 
-REM --- Try to build the conditional features cache (won't stop GUI if it fails) ---
-echo [start] Building conditional features cache (astro+event)...
-"%VENV_PY%" scripts\build_features.py
+:: --- Reset if asked -----------------------------------------------------
+if /i "!MODE!"=="reset" (
+    if exist ".\venv" (
+        echo [INFO] Removing the existing venv...
+        rmdir /s /q ".\venv"
+    )
+    echo [INFO] Reset done. Run START.bat again.
+    goto :end
+)
 
-REM --- Launch Streamlit via python -m (no reliance on PATH) ---
-echo [start] Launching GUI...
-"%VENV_PY%" -m streamlit run gui\streamlit_app.py
-if errorlevel 1 goto streamlitfail
+:: --- Venv ---------------------------------------------------------------
+set "FRESH=0"
+if not exist ".\venv\Scripts\python.exe" (
+    echo [INFO] Creating virtual environment...
+    %PY% -m venv .\venv
+    if errorlevel 1 (
+        echo [ERROR] Could not create the virtual environment.
+        goto :error
+    )
+    set "FRESH=1"
+)
 
-goto end
+call ".\venv\Scripts\activate.bat"
+if not defined VIRTUAL_ENV (
+    echo [ERROR] Could not activate the virtual environment.
+    echo         Try: START.bat reset
+    goto :error
+)
 
-:pipfail
-echo [start] ERROR: Failed to install requirements. Check your internet and try again.
-pause
-exit /b 1
+:: --- Dependencies -------------------------------------------------------
+:: Only installed on a fresh venv or when the marker is missing, so normal
+:: startup does not wait on pip every single time.
+if "!FRESH!"=="1" goto :install
+if not exist ".\venv\.kairos-deps-ok" goto :install
+goto :skipinstall
 
-:streamlitfail
-echo [start] ERROR: Streamlit failed to start.
-echo Try running manually to see full error:
-echo "%VENV_PY%" -m streamlit run gui\streamlit_app.py
+:install
+echo [INFO] Installing pinned dependencies. First run only.
+python -m pip install --upgrade pip >nul 2>&1
+python -m pip install -r requirements.txt
+if errorlevel 1 (
+    echo [ERROR] Dependency install failed. Check your connection.
+    goto :error
+)
+echo ok > ".\venv\.kairos-deps-ok"
+echo [INFO] Dependencies installed.
+
+:skipinstall
+
+if /i "!MODE!"=="ml" (
+    echo [INFO] Installing machine-learning extras. This is a large download.
+    python -m pip install -r requirements-ml.txt
+    if errorlevel 1 (
+        echo [ERROR] Machine-learning extras failed to install.
+        goto :error
+    )
+)
+
+:: --- Launch -------------------------------------------------------------
+echo.
+echo [INFO] Starting. Your browser should open in a few seconds.
+echo [INFO] Keep this window open; closing it stops the server.
+echo.
+python kairos_app.py
+if errorlevel 1 (
+    echo.
+    echo [ERROR] The app exited with an error. The traceback is above.
+    goto :error
+)
+goto :end
+
+:error
+echo.
+echo [FAILURE] Startup did not complete.
 pause
 exit /b 1
 
 :end
+echo.
+pause
 endlocal
+exit /b 0

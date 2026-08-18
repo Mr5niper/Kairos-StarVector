@@ -1,37 +1,52 @@
 # pyproject.toml
+#
+# Present so `pip install -e .` works for development. It is not the install
+# path the batch files use: BUILD_EXE.bat and START.bat install from
+# requirements.txt, because exact == pins are the point and a pyproject
+# dependency list cannot express a tested lockfile.
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stock-forecast"
-version = "0.1.0"
-description = "Championship Stock Forecast Framework"
-authors = [{ name = "Kairos Vector" }]
+name = "kairos-starvector"
+version = "6.0.0"
+description = "Market geometry, planetary alignment and Gann analysis"
 readme = "README.md"
-requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Mr5niper" }]
+requires-python = ">=3.11"
 dependencies = [
-    "numpy",
-    "pandas",
-    "scikit-learn",
-    "scipy",
-    "torch",
-    "torchvision",
-    "torchaudio",
-    "statsmodels",
-    "yfinance",
-    "pyyaml",
-    "tqdm",
-    "lightgbm",
-    "optuna",
-    "skyfield",
-    "transformers",
-    "sentence-transformers",
-    "feedparser",
-    "streamlit",
-    "plotly",
+    "numpy>=2.0,<3",
+    "pandas>=2.2,<3",
+    "scipy>=1.11",
+    "ephem>=4.1",
+    "yfinance>=1.0",
+    "streamlit>=1.50",
+    "plotly>=6.0",
+    "PyYAML>=6.0",
 ]
+
+[project.optional-dependencies]
+# Mirrors requirements-ml.txt. Install that file instead for pinned versions.
+ml = [
+    "torch>=2.6",
+    "lightgbm>=4.5",
+    "statsmodels>=0.14",
+    "scikit-learn>=1.5",
+    "optuna>=4.0",
+    "transformers>=4.45",
+    "sentence-transformers>=3.0",
+    "feedparser>=6.0",
+    "tqdm>=4.66",
+]
+
+[project.scripts]
+kairos-starvector = "kairos_app:main"
+
+[tool.setuptools]
+py-modules = ["kairos_app"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["stock_forecast*"]
+include = ["kairos*", "stock_forecast*"]
