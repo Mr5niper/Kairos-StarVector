@@ -5,6 +5,9 @@ rays from each planetary point in all four directions, and works out where
 those rays cross — including crossings between points that have already
 happened and points still in the future.
 
+<img width="2525" height="1860" alt="image" src="https://github.com/user-attachments/assets/456f7cd9-c6e2-4e54-a91a-a39142614263" />
+
+
 ---
 
 ## What you need
