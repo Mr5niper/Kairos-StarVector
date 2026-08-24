@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kairos-starvector"
-version = "6.0.0"
+version = "6.0.2"
 description = "Market geometry, planetary alignment and Gann analysis"
 readme = "README.md"
 license = { text = "MIT" }

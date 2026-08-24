@@ -69,6 +69,7 @@ RAY_UNIFORM_WIDTH = 1
 
 RAY_STYLE: Dict[float, Tuple[float, int, str]] = {
     # ratio: (opacity, width, class)
+    1 / 16: (RAY_UNIFORM_OPACITY, RAY_UNIFORM_WIDTH, "fast"),
     1 / 8: (RAY_UNIFORM_OPACITY, RAY_UNIFORM_WIDTH, "fast"),
     1 / 4: (RAY_UNIFORM_OPACITY, RAY_UNIFORM_WIDTH, "fast"),
     1 / 3: (RAY_UNIFORM_OPACITY, RAY_UNIFORM_WIDTH, "medium"),
@@ -78,6 +79,7 @@ RAY_STYLE: Dict[float, Tuple[float, int, str]] = {
     3.0: (RAY_UNIFORM_OPACITY, RAY_UNIFORM_WIDTH, "medium"),
     4.0: (RAY_UNIFORM_OPACITY, RAY_UNIFORM_WIDTH, "fast"),
     8.0: (RAY_UNIFORM_OPACITY, RAY_UNIFORM_WIDTH, "fast"),
+    16.0: (RAY_UNIFORM_OPACITY, RAY_UNIFORM_WIDTH, "fast"),
 }
 
 PLANET_COLOURS: Dict[str, str] = {

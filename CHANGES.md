@@ -1,5 +1,55 @@
 # Changelog
 
+## 6.0.2
+
+* **No more committed .spec file.** PyInstaller regenerates a spec on every
+  run, so a checked-in one is a build artifact pretending to be source: edit
+  the bat and the spec silently wins, edit the spec and the next build
+  overwrites it. Every option now lives in `BUILD_EXE.bat` as command-line
+  flags, the generated spec is deleted when the build finishes, and `*.spec`
+  is git-ignored.
+* **Removed two hidden imports that never existed.** `scipy.special._cdflib`
+  and `scipy._lib.array_api_compat.numpy.fft` were raising
+  `ERROR: Hidden import not found` on every build. Found by running the
+  command-line build for real rather than only checking that the spec parsed.
+* Icon validation moved into the bat, so a PNG renamed to `.ico` is caught
+  before PyInstaller reaches its resource writer, where the failure is a
+  struct unpacking error that never mentions the icon.
+* **README rewritten for people running the program**, not for people
+  reviewing its design. It now covers what it does, how to install it, how to
+  start it and how to drive each tab, with the reasoning and verification
+  moved here where it belongs. Version numbers removed from it as well: the
+  release is a dated zip, and a hand-edited version line in a README only ever
+  drifts out of step with the one in the code.
+* Known trade-off: the command line has no equivalent of the spec's
+  `filter_submodules`, so two harmless warnings return, for `pydeck.widget`
+  (wants ipywidgets) and `pyarrow.tests.parquet` (wants pytest). The build
+  now says so up front rather than leaving them to look like problems.
+
+## 6.0.1
+
+* **Fan spread widened.** The default ray ratios were 1x2, 1x1 and 2x1, which
+  on a typical chart occupy screen angles of 14, 26 and 44 degrees — a 31
+  degree band that reads as one bundle at slightly different tilts rather than
+  a fan. Squaring the chart in 6.0.0 fixed the tilt but not the spread.
+  Default is now 1x8 through 8x1, spanning 3 to 76 degrees across eight
+  distinct angle bands.
+* **Added 1x16 and 16x1** to the ratio set. On a wide chart even 8x1 only
+  reaches 76 degrees, so the near-vertical rays a classical fan drawing shows
+  were not reachable at all.
+* **Removed the "include fast ratios" filter.** It silently discarded 1x4,
+  1x8, 4x1 and 8x1 — precisely the ratios that give a fan its spread. With
+  ratios chosen explicitly in the picker, a second filter throwing some of
+  them away was a trap rather than a convenience.
+* Ray origins default lowered from 8 to 5, since seven ratios across four
+  quadrants is 28 rays per dot. Density is now controlled by origin count,
+  which is the correct dial.
+* **Build now warns about stale files** from a previous version left behind by
+  extracting an archive over an existing checkout. `stock_forecast/dataset.py`
+  still imports skyfield, which is no longer a dependency, and both `gui/` and
+  `stock_forecast/` are bundled wholesale into the executable, so leftovers
+  ship inside it.
+
 ## 6.0.0
 
 The degree-space Gann grid becomes the primary chart. Everything below was

@@ -6,30 +6,29 @@ setlocal enabledelayedexpansion
 ::  Strictly requires Python 3.13.12
 ::
 ::  Usage:
-::     BUILD_EXE.bat           Standard build. Chart, alignment wave,
-::                             statistics and cycle analysis. Roughly
-::                             350-450 MB, opens in a few seconds.
+::     BUILD_EXE.bat           Standard build. Chart, sky grid, statistics
+::                             and cycle analysis. Roughly 350-450 MB.
 ::
 ::     BUILD_EXE.bat full      Also bundles PyTorch, transformers and
 ::                             LightGBM for the Forecast models tab.
-::                             Roughly 1.5-2.5 GB and takes about a minute
-::                             to unpack on every launch, because one-file
-::                             mode re-extracts the whole archive each time
-::                             it starts. Only worth it if you actually run
-::                             the neural benchmark. Otherwise leave it out
-::                             and run that from source instead.
+::                             Roughly 1.5-2.5 GB and about a minute to
+::                             unpack on every launch, because one-file mode
+::                             re-extracts the whole archive each time it
+::                             starts.
 ::
-::  Everything installs from requirements.txt with exact == versions, so
-::  the same build inputs produce the same build every time.
+::  No .spec file is used or kept. PyInstaller regenerates a spec on every
+::  run from the command line below, so a committed one is a build artifact
+::  pretending to be source: edit the bat and the spec silently wins, edit
+::  the spec and the next build overwrites it. Every option lives here, and
+::  the generated spec is deleted afterwards and git-ignored.
 :: ==========================================================================
 
 set "APP_NAME=Kairos-StarVector"
 set "REQUIRED_PYTHON_VERSION=3.13.12"
 set "PYTHON_DOWNLOAD_URL=https://www.python.org/downloads/release/python-31312/"
 set "PY=py -3.13"
-set "SPEC_FILE=Kairos-StarVector.spec"
+set "ENTRY=kairos_app.py"
 
-:: --- Parse the optional build mode ---------------------------------------
 set "BUILD_MODE=light"
 if /i "%~1"=="full" set "BUILD_MODE=full"
 if /i "%~1"=="-full" set "BUILD_MODE=full"
@@ -45,9 +44,6 @@ echo.
 :: ==========================================================================
 :: Pre-flight: verify Python via the py launcher
 :: ==========================================================================
-:: The py launcher lives in C:\Windows and is found even when the 'python'
-:: on PATH is a different version, which is the usual reason a build script
-:: silently uses the wrong interpreter.
 echo [INFO] Checking Python version...
 
 %PY% --version >nul 2>&1
@@ -80,9 +76,6 @@ if not "!CURRENT_PYTHON_VERSION!"=="%REQUIRED_PYTHON_VERSION%" (
     echo         Windows builds. A different minor version will fall back to
     echo         building from source and will need a C compiler.
     echo.
-    echo         Install the correct version from:
-    echo         %PYTHON_DOWNLOAD_URL%
-    echo.
     start "" "%PYTHON_DOWNLOAD_URL%"
     goto :error
 )
@@ -92,7 +85,7 @@ if not "!CURRENT_PYTHON_VERSION!"=="%REQUIRED_PYTHON_VERSION%" (
 :: ==========================================================================
 echo [INFO] Verifying project files...
 set "MISSING=0"
-for %%F in (kairos_app.py requirements.txt %SPEC_FILE% gui\app.py kairos\astro.py configs\default.yaml) do (
+for %%F in (%ENTRY% requirements.txt gui\app.py kairos\astro.py configs\default.yaml) do (
     if not exist "%%F" (
         echo [ERROR] Missing required file: %%F
         set "MISSING=1"
@@ -106,11 +99,41 @@ if "!MISSING!"=="1" (
 )
 echo [INFO] All required files present.
 
+:: --- Stale files from an older version ------------------------------------
+:: Extracting an archive over an existing checkout overwrites matching files
+:: and adds new ones, but never deletes files the archive does not contain.
+:: That matters rather than just being untidy: the whole gui and
+:: stock_forecast folders are bundled as data, so leftovers are compiled into
+:: the exe, and stock_forecast\dataset.py still imports skyfield, which
+:: stopped being a dependency in 6.0.0.
+set "STALE=0"
+for %%F in (
+    gui\gann_app.py
+    gui\streamlit_app.py
+    stock_forecast\dataset.py
+    stock_forecast\gann_grid.py
+    scripts\run_optuna.py
+    scripts\fetch_news_yf.py
+) do (
+    if exist "%%F" (
+        echo [WARN] Stale file from a previous version: %%F
+        set "STALE=1"
+    )
+)
+if "!STALE!"=="1" (
+    echo.
+    echo [WARN] Those files were removed in 6.0.0 and are superseded.
+    echo        Delete them and run this again for a clean build.
+    echo.
+    choice /C YN /M "Continue anyway"
+    if errorlevel 2 goto :error
+)
+
 :: ==========================================================================
 :: STEP 1 - Virtual environment
 :: ==========================================================================
 echo.
-echo [STEP 1/5] Creating virtual environment in '.\venv'...
+echo [STEP 1/6] Creating virtual environment in '.\venv'...
 
 if not exist ".\venv\Scripts\python.exe" (
     %PY% -m venv .\venv
@@ -127,12 +150,11 @@ if not exist ".\venv\Scripts\python.exe" (
 :: STEP 2 - Activate
 :: ==========================================================================
 echo.
-echo [STEP 2/5] Activating virtual environment...
+echo [STEP 2/6] Activating virtual environment...
 call ".\venv\Scripts\activate.bat"
 
 if not defined VIRTUAL_ENV (
     echo [ERROR] Failed to activate the virtual environment.
-    echo         Expected: .\venv\Scripts\activate.bat
     goto :error
 )
 echo [INFO] Active: %VIRTUAL_ENV%
@@ -141,24 +163,21 @@ echo [INFO] Active: %VIRTUAL_ENV%
 :: STEP 3 - Dependencies
 :: ==========================================================================
 echo.
-echo [STEP 3/5] Installing pinned dependencies...
+echo [STEP 3/6] Installing pinned dependencies...
 python -m pip install --upgrade pip >nul 2>&1
 
 :: --only-binary :all: refuses to build anything from source. Every version
-:: in requirements.txt publishes a CPython 3.13 Windows wheel, so if pip
-:: ever wants to compile something, the pin has drifted and that should be
-:: an error rather than a twenty-minute detour into a missing compiler.
+:: in requirements.txt publishes a CPython 3.13 Windows wheel, so if pip ever
+:: wants to compile something the pin has drifted, and that should be an
+:: error rather than a twenty-minute detour into a missing compiler.
 echo [INFO] Installing from requirements.txt (exact versions, wheels only)...
 python -m pip install --only-binary :all: -r requirements.txt
 if errorlevel 1 (
     echo.
     echo [WARN] Wheel-only install failed. Retrying without that restriction.
-    echo        If this succeeds, something in requirements.txt no longer has
-    echo        a 3.13 Windows wheel and is being compiled locally.
     python -m pip install -r requirements.txt
     if errorlevel 1 (
         echo [ERROR] Failed to install dependencies.
-        echo         Check your internet connection and the errors above.
         goto :error
     )
 )
@@ -173,17 +192,16 @@ if /i "!BUILD_MODE!"=="full" (
         goto :error
     )
 )
-
 echo [INFO] Dependencies installed.
 
 :: ==========================================================================
-:: STEP 4 - Import self-test
+:: STEP 4 - Environment self-test
 :: ==========================================================================
 :: Catching a broken environment here is far cheaper than discovering it
 :: after a twenty-minute PyInstaller run.
 echo.
-echo [STEP 4/5] Verifying the environment before building...
-python -c "import numpy,pandas,scipy,plotly,streamlit,yfinance,ephem,yaml; import kairos; from kairos import astro,waves,gann,market,charting,paths; print('[INFO] Imports OK - kairos', kairos.__version__)"
+echo [STEP 4/6] Verifying the environment before building...
+python -c "import numpy,pandas,scipy,plotly,streamlit,yfinance,ephem,yaml; import kairos; from kairos import astro,waves,gann,market,charting,paths,calibrate,skygrid; print('[INFO] Imports OK - kairos', kairos.__version__)"
 if errorlevel 1 (
     echo [ERROR] The environment failed its import check. Not building.
     goto :error
@@ -195,22 +213,110 @@ if errorlevel 1 (
     goto :error
 )
 
+:: Validate the icon before PyInstaller touches it. A PNG renamed to .ico is
+:: the usual mistake, and PyInstaller's own failure for it is a struct
+:: unpacking error deep in its resource writer that never mentions the icon.
+set "ICON_ARG="
+if exist "icon.ico" (
+    python -c "import sys; sys.exit(0 if open('icon.ico','rb').read(4)==b'\x00\x00\x01\x00' else 1)"
+    if errorlevel 1 (
+        echo [ERROR] icon.ico is not a valid icon file - probably a renamed PNG.
+        echo         Convert it properly, or delete it to build without an icon.
+        goto :error
+    )
+    set "ICON_ARG=--icon icon.ico"
+    echo [INFO] Icon OK: icon.ico
+) else (
+    echo [INFO] No icon.ico found; building without an icon.
+)
+
+set "VERSION_ARG="
+if exist "version.txt" set "VERSION_ARG=--version-file version.txt"
+
 :: ==========================================================================
-:: STEP 5 - Build
+:: STEP 5 - Assemble the PyInstaller command
+:: ==========================================================================
+:: Built up in pieces rather than one enormous line, because a single command
+:: spanning forty caret-continued lines breaks the moment one trailing space
+:: sneaks in after a caret.
+echo.
+echo [STEP 5/6] Assembling build options...
+
+set "ARGS=--clean --noconfirm --onefile --noupx --console --name %APP_NAME%"
+set "ARGS=!ARGS! !ICON_ARG! !VERSION_ARG!"
+
+:: Bundled resources. The GUI script is data rather than an analysed import,
+:: so kairos is added both as data and as collected submodules: the frozen
+:: importer needs the modules, and paths.py resolves the source either way.
+set "ARGS=!ARGS! --add-data "gui;gui""
+set "ARGS=!ARGS! --add-data "kairos;kairos""
+set "ARGS=!ARGS! --add-data "configs;configs""
+set "ARGS=!ARGS! --add-data "stock_forecast;stock_forecast""
+if exist "README.md" set "ARGS=!ARGS! --add-data "README.md;.""
+
+:: Streamlit's compiled frontend, package metadata and dynamically imported
+:: server stack are invisible to the import scanner and must be collected.
+set "ARGS=!ARGS! --collect-all streamlit --collect-all altair --collect-all pydeck"
+set "ARGS=!ARGS! --collect-all narwhals --collect-all uvicorn --collect-all starlette"
+set "ARGS=!ARGS! --collect-all plotly --collect-all pyarrow"
+set "ARGS=!ARGS! --collect-all yfinance --collect-all curl_cffi --collect-all ephem"
+set "ARGS=!ARGS! --collect-submodules kairos"
+
+:: Uvicorn resolves its protocol classes from strings at runtime.
+set "ARGS=!ARGS! --hidden-import uvicorn.protocols.http.httptools_impl"
+set "ARGS=!ARGS! --hidden-import uvicorn.protocols.http.h11_impl"
+set "ARGS=!ARGS! --hidden-import uvicorn.protocols.websockets.websockets_impl"
+set "ARGS=!ARGS! --hidden-import uvicorn.loops.asyncio"
+set "ARGS=!ARGS! --hidden-import uvicorn.lifespan.on --hidden-import uvicorn.lifespan.off"
+set "ARGS=!ARGS! --hidden-import httptools --hidden-import websockets"
+set "ARGS=!ARGS! --hidden-import websockets.legacy --hidden-import multipart"
+set "ARGS=!ARGS! --hidden-import itsdangerous --hidden-import encodings.idna"
+set "ARGS=!ARGS! --hidden-import pandas._libs.tslibs.timedeltas"
+
+if /i "!BUILD_MODE!"=="full" (
+    echo [INFO] FULL build: including the machine-learning stack.
+    set "ARGS=!ARGS! --collect-all torch --collect-all lightgbm"
+    set "ARGS=!ARGS! --collect-all statsmodels --collect-all sklearn"
+    set "ARGS=!ARGS! --collect-submodules stock_forecast"
+    set "ARGS=!ARGS! --exclude-module tkinter --exclude-module matplotlib"
+    set "ARGS=!ARGS! --exclude-module PyQt5 --exclude-module PyQt6"
+    set "ARGS=!ARGS! --exclude-module PySide2 --exclude-module PySide6"
+    set "ARGS=!ARGS! --exclude-module IPython --exclude-module jupyter"
+    set "ARGS=!ARGS! --exclude-module notebook --exclude-module pytest"
+) else (
+    echo [INFO] LIGHT build: machine-learning stack excluded.
+    :: Excluded rather than merely absent, so a stray import cannot drag two
+    :: gigabytes in if these happen to be installed in the venv.
+    set "ARGS=!ARGS! --exclude-module torch --exclude-module torchvision"
+    set "ARGS=!ARGS! --exclude-module torchaudio --exclude-module transformers"
+    set "ARGS=!ARGS! --exclude-module sentence_transformers"
+    set "ARGS=!ARGS! --exclude-module tokenizers --exclude-module safetensors"
+    set "ARGS=!ARGS! --exclude-module lightgbm --exclude-module optuna"
+    set "ARGS=!ARGS! --exclude-module sklearn --exclude-module scikit_learn"
+    set "ARGS=!ARGS! --exclude-module statsmodels --exclude-module tensorflow"
+    set "ARGS=!ARGS! --exclude-module keras --exclude-module onnxruntime"
+    set "ARGS=!ARGS! --exclude-module tkinter --exclude-module matplotlib"
+    set "ARGS=!ARGS! --exclude-module PyQt5 --exclude-module PyQt6"
+    set "ARGS=!ARGS! --exclude-module PySide2 --exclude-module PySide6"
+    set "ARGS=!ARGS! --exclude-module IPython --exclude-module jupyter"
+    set "ARGS=!ARGS! --exclude-module notebook --exclude-module pytest"
+    set "ARGS=!ARGS! --exclude-module sqlalchemy --exclude-module alembic"
+)
+
+:: ==========================================================================
+:: STEP 6 - Build
 :: ==========================================================================
 echo.
-echo [STEP 5/5] Building the one-file executable...
+echo [STEP 6/6] Building the one-file executable...
 echo [INFO] This takes several minutes. PyInstaller is quiet in places; that
 echo        is normal, not a hang.
 echo.
+echo [INFO] Two warnings about 'pydeck.widget' and 'pyarrow.tests.parquet'
+echo        are expected and harmless. Those subpackages bridge to ipywidgets
+echo        and pytest, neither of which ships here.
+echo.
 
-if /i "!BUILD_MODE!"=="full" (
-    set "KAIROS_BUILD_FULL=1"
-) else (
-    set "KAIROS_BUILD_FULL=0"
-)
-
-pyinstaller --clean --noconfirm "%SPEC_FILE%"
+pyinstaller !ARGS! %ENTRY%
 
 if errorlevel 1 (
     echo.
@@ -220,7 +326,7 @@ if errorlevel 1 (
     echo           - Antivirus locked a file in build\ or dist\. Add this
     echo             folder to your exclusions and try again.
     echo           - Not enough free disk space. A light build needs about
-    echo             2 GB free while working; a full build needs about 8 GB.
+    echo             2 GB while working; a full build needs about 8 GB.
     echo           - A stale venv. Delete the venv folder and rerun.
     goto :error
 )
@@ -228,6 +334,13 @@ if errorlevel 1 (
 if not exist "dist\%APP_NAME%.exe" (
     echo [ERROR] The build reported success but dist\%APP_NAME%.exe is missing.
     goto :error
+)
+
+:: The spec PyInstaller just generated is an artifact, not source. Remove it
+:: so it cannot be committed or drift out of step with this script.
+if exist "%APP_NAME%.spec" (
+    del /q "%APP_NAME%.spec"
+    echo [INFO] Removed the generated %APP_NAME%.spec
 )
 
 for %%A in ("dist\%APP_NAME%.exe") do set "EXE_SIZE=%%~zA"
@@ -241,13 +354,12 @@ echo   Executable : dist\%APP_NAME%.exe
 echo   Size       : !EXE_MB! MB
 echo   Mode       : !BUILD_MODE!
 echo.
-echo   Double-click the exe to start. It opens a console window that shows
-echo   the local address, then your browser. Keep the console open; closing
-echo   it stops the server.
+echo   Double-click the exe to start. It opens a console window showing the
+echo   local address, then your browser. Keep the console open; closing it
+echo   stops the server.
 echo.
-echo   One-file executables unpack themselves to a temp folder on every
-echo   launch, so the first few seconds of startup are that extraction,
-echo   not the program hanging.
+echo   One-file executables unpack to a temp folder on every launch, so the
+echo   first few seconds of startup are that extraction, not a hang.
 echo ==========================================================================
 goto :end
 
