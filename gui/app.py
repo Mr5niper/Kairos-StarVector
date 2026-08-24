@@ -1246,10 +1246,17 @@ with tabs[0]:
     dg_manual_rate = d6.number_input(
         "Manual rate (deg/day)", 0.005, 20.0, 0.5, 0.005, format="%.3f",
         key="dg_dpd", disabled=(dg_rate_mode == "square the chart"))
-    dg_ratios = d7.multiselect("Ray ratios", list(G.FAN_RATIOS.keys()),
-                               default=["1x2", "1x1", "2x1"], key="dg_ratios")
+    dg_ratios = d7.multiselect(
+        "Ray ratios", list(G.FAN_RATIOS.keys()),
+        default=["1x8", "1x4", "1x2", "1x1", "2x1", "4x1", "8x1"],
+        key="dg_ratios",
+        help="The spread of the fan comes from the range of ratios, not the "
+             "number of rays. Three adjacent ratios span about 30 degrees on "
+             "screen and read as one bundle at slightly different tilts; this "
+             "set spans about 80 degrees and reads as a fan. Control clutter "
+             "with the ray-origin count instead.")
     dg_rayorigins = d8.slider(
-        "Dots that emit rays", 1, 60, 8, 1, key="dg_origins",
+        "Dots that emit rays", 1, 60, 5, 1, key="dg_origins",
         help="Every interval dot is always drawn. This limits only how many of "
              "them radiate rays, since rays are what fills the chart.")
 
@@ -1269,9 +1276,7 @@ with tabs[0]:
         index=0, key="dg_omode")
     dg_fwd = d10.checkbox("Forward rays", value=True, key="dg_fwd")
     dg_back = d11.checkbox("Backward rays", value=True, key="dg_back")
-    dg_fast = d12.checkbox("Include fast ratios", value=False, key="dg_fast",
-                           help="The steepest ratios cross the full 180 degrees "
-                                "in days.")
+    dg_dotsize2 = d12.empty()   # spacer; ratio filtering is now explicit
 
     d13, d14 = st.columns(2)
     dg_autofit = d13.checkbox("Auto-fit the stock to the planet", value=True,
@@ -1325,7 +1330,7 @@ with tabs[0]:
                 stock_ratios=manual_r, stock_offsets=manual_o,
                 autofit=bool(dg_autofit), extend_days=int(dg_future),
                 max_ray_days=(int(dg_raylen) if int(dg_raylen) > 0 else None), forward=bool(dg_fwd),
-                backward=bool(dg_back), include_fast=bool(dg_fast),
+                backward=bool(dg_back), include_fast=True,
                 ray_dots=int(dg_rayorigins),
                 ray_dot_mode=dg_originmode,
             )
