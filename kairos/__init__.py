@@ -18,7 +18,7 @@ market    price loading with caching and an offline fallback
 charting  plotly figures
 paths     resource locations for source and frozen runs
 """
-__version__ = "6.0.0"
+__version__ = "6.0.2"
 __all__ = ["astro", "waves", "gann", "market", "charting", "paths", "calibrate",
            "skygrid"]
 

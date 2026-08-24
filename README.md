@@ -1,353 +1,235 @@
 # Kairos StarVector
 
-**6.0.0** — MIT licensed.
-
-A degree-space Gann grid. Planetary peak altitudes are plotted as points on a
-0–180 degree axis, Gann rays radiate from each point in all four directions,
-your stocks are overlaid as scaled curves, and every ray crossing is solved
-and tabulated. Because planetary positions are computable in both directions,
-crossings between a ray from a past point and a ray from a **future** point
-can be calculated today.
-
-Also included: an alignment-wave model, cycle detection, parameter calibration
-with held-out testing, and an optional neural benchmark.
+Plots planetary geometry against stock prices on a degree scale, draws Gann
+rays from each planetary point in all four directions, and works out where
+those rays cross — including crossings between points that have already
+happened and points still in the future.
 
 ---
 
-## Quick start
+## What you need
+
+**Windows** and **Python 3.13.12**, nothing else. Everything else installs
+itself the first time you run it.
+
+Get Python from
+[python.org/downloads/release/python-31312](https://www.python.org/downloads/release/python-31312/)
+and tick **"py launcher"** during installation. The scripts look for Python
+through that launcher, so a different Python already on your PATH will not
+interfere.
+
+If you were given a prebuilt `.exe`, you do not need Python at all — skip to
+[Running the executable](#running-the-executable).
+
+---
+
+## Setup
+
+Unzip anywhere. Keep the folder structure as it is; the program looks for its
+own files by relative path.
+
+Then double-click:
 
 ```
 START.bat
 ```
 
-Creates a virtual environment, installs the pinned dependencies on first run
-only, and opens the app in your browser.
+The first run creates a virtual environment and downloads the dependencies,
+which takes a few minutes. Runs after that start in seconds. Your browser
+opens automatically at `http://localhost:8501`.
+
+A console window stays open while the program runs. **Closing it stops the
+program.** That is the normal way to quit.
+
+### Other things START.bat can do
+
+| Command | What it does |
+|---|---|
+| `START.bat` | Start the program |
+| `START.bat ml` | Also install the optional machine-learning extras (large download, only needed for the Forecast models tab) |
+| `START.bat reset` | Delete the virtual environment so the next run rebuilds it from scratch |
+
+---
+
+## Building a standalone .exe
+
+If you want a single file you can copy to a machine without Python:
 
 ```
 BUILD_EXE.bat
 ```
 
-Produces `dist\Kairos-StarVector.exe`, a single file needing no Python on the
-target machine. Add `full` to bundle the machine-learning extras.
+Takes several minutes and produces `dist\Kairos-StarVector.exe`. Add `full` to
+include the machine-learning extras, which makes it far larger and slower to
+start:
 
-Both require **exactly Python 3.13.12**, located through the `py` launcher so
-a different `python` on your PATH cannot interfere.
+| | `BUILD_EXE.bat` | `BUILD_EXE.bat full` |
+|---|---|---|
+| Size | ~350–450 MB | ~1.5–2.5 GB |
+| Startup | a few seconds | about a minute, every launch |
+| Forecast models tab | not included | included |
+
+Everything except that one tab works in the standard build. Unless you plan to
+run the neural benchmark, build the standard one.
+
+### Running the executable
+
+Double-click it. A console window opens showing the local address, then your
+browser opens. Keep the console open; closing it stops the program.
+
+The first few seconds of startup are the executable unpacking itself to a temp
+folder. It does that on every launch — that is how one-file executables work,
+not a fault.
 
 ---
 
-## The Gann sky grid
+## Using it
 
-This is the first tab and the main event.
+### Gann sky grid
 
-**The vertical axis is degrees, 0 at the bottom to 180 at the top.** Not
-price. Each dot is the chosen planet's peak altitude — its height at
-culmination, seen from your latitude — for one interval, sitting at its
-measured angle with no conversion applied.
+The first tab, and the main one.
 
-**Dots appear at every interval across the whole displayed timeline**, past and
-future. Choose day, week, month, quarter or year. Nothing is sampled or
-skipped, because planetary positions are deterministic and cheap to compute.
+**The vertical axis is degrees, 0 at the bottom to 180 at the top.** Not price.
+Each dot is your chosen planet's peak height in the sky for one interval, at
+its actual measured angle. Your stock is scaled onto that same degree scale as
+an overlay. The red vertical line is today.
 
-**Gann rays radiate from each dot in all four directions**: forward, backward,
-up and down. Every ray is drawn at the same width and opacity — a Gann line is
-a Gann line, and where price sits relative to it is the information.
+Getting started:
 
-**Your stocks are overlaid**, scaled into the degree band by a ratio and offset
-you adjust until past movement lines up with the planetary geometry. Auto-fit
-gives a least-squares starting position.
+1. Enter a ticker. Yahoo Finance symbols — `^GSPC` for the S&P 500, `AAPL`,
+   `GC=F` for gold futures, `BTC-USD`. Several separated by commas will be
+   overlaid together.
+2. Set **Start** and **End** in the sidebar for how much history to show.
+3. Pick a **Dot interval** — day, week, month, quarter or year. You get a dot
+   for every one of those across the whole chart, past and future.
+4. Pick a **planet of choice**. One is easiest to read; each extra planet adds
+   its own dots and rays in its own colour.
+5. Set **Future days beyond the window** for how far past today to project.
 
-**The red line is now.** Dots to the right of it are future positions, exact
-rather than forecast.
+**Fitting the stock to the planet.** Leave *Auto-fit* on and the program
+picks a starting ratio and offset for you. Turn it off to set them yourself:
+**ratio** stretches or squashes the price curve, **offset** slides it up and
+down. Adjust until the past movement lines up with the planetary geometry the
+way you want.
 
-### Squaring the chart
+**If the chart looks like a solid mess**, turn things down in this order:
 
-The 1x1 rate is derived from the window width by default, which is what Gann
-meant by squaring a chart. This matters more than it sounds:
+1. **Dots that emit rays** — lower it. This is the big one. Every dot is still
+   drawn; only some of them radiate.
+2. **Ray length** — set a number of days instead of unlimited.
+3. **Ray ratios** — remove some. Keep a wide spread rather than adjacent ones,
+   since the spread is what makes it look like a fan.
 
-| Window | 1x1 at a fixed 1°/day covers | Looks like |
-|---|---|---|
-| 4 months | 150% of chart width | gentle diagonal |
-| 2 years | 20% | steep |
-| 3 years | 14% | vertical |
+**If every ray looks vertical**, the 1x1 rate is set manually and is too steep
+for your window. Set **1x1 rate** back to *square the chart*.
 
-Same arithmetic, unusable at one scale and correct at the other. Squaring gives
-`180° ÷ window days`, so the 1x1 stays on the diagonal at any window length.
-Measured on a three-year window: median screen slope 1.00, exactly diagonal. A
-manual rate is available, with the squared value always shown beside it.
+**Crossings.** Below the chart is a table of every place two rays cross,
+labelled:
 
-Dots are cheap; rays are not. Every interval dot is always drawn, and a
-separate control limits how many emit rays, with a mode for choosing which —
-nearest now, future only, highest angle, or spread evenly.
-
-### Crossings
-
-Every ray pair is solved arithmetically in (day, degree) space and classified:
-
-| kind | meaning |
+| | |
 |---|---|
-| `past-future` | one ray from a point behind us, one from a future point |
+| `past-future` | one ray from a point behind us, one from a point ahead |
 | `future-future` | both ahead |
 | `past-past` | both behind |
 
-`past-future` is the decision candidate and the reason backward rays exist. A
-future planetary position is exact today, so a ray cast back from it crosses
-already-happened geometry, and that crossing is computable now rather than in
-hindsight.
+`past-future` crossings are the interesting ones — both halves are exact
+geometry, and they can be worked out today. **Confluence zones** group
+crossings that land within a few days and degrees of each other. Tick *Mark
+confluence zones* to show them on the chart as well as in the table.
 
-Crossings clustering within a few days and degrees are grouped into confluence
-zones. One crossing of two lines is weak; a cluster of eight is what the method
-looks for. Zone markers are off by default on the chart and available in the
-table, which reads better.
+Everything is downloadable as CSV.
 
----
+### The other tabs
 
-## Other tabs
-
-**Chart** — price with Gann fans anchored to swing pivots or alignment dates,
-Square of Nine levels, round-number grids, time counts, planetary price lines,
-plus an angle-analysis panel: market strength relative to the fan, the rule of
-all angles measured against a control, price clusters, retracements, squaring
-the range.
-
-**Alignment wave** — the trickle-down model. Each planetary alignment emits an
-influence that decays forward through time; overlapping tails sum into a wave,
-projected past the last bar.
-
-**Statistics** — correlations and event studies with p-values that account for
-autocorrelation. The tab that decides whether anything else means anything.
-
-**Calibrate & forecast** — fit wave parameters on a training window, re-score on
-held-out data, compare against the same search run on phase-randomised prices,
-then project dated LONG / SHORT / FLAT positions forward.
-
-**Cycles** — periodogram of price on a calendar-day grid, dominant cycle
-detection, matched against measured synodic periods.
-
-**Calendar** — every aspect, station and ingress, past and future, with
-zodiacal positions and daily motion.
-
-**Forecast models** — optional. ARIMA, a conditional LSTM and a conditional
-WGAN-GP on walk-forward windows, against a persistence baseline.
-
-**Data** — the underlying series, exportable, plus environment details.
+| Tab | What it is for |
+|---|---|
+| **Chart** | Ordinary price chart with Gann fans from swing pivots, Square of Nine levels, time counts and planetary price lines |
+| **Alignment wave** | Treats each planetary alignment as an influence that fades over the following weeks, and adds them up into one wave |
+| **Statistics** | Measures whether the patterns you are looking at hold up against chance |
+| **Calibrate & forecast** | Tunes settings on older data, checks them on data it was not tuned on, then projects buy/sell/flat dates forward |
+| **Cycles** | Finds repeating cycles in the price and compares them against planetary cycle lengths |
+| **Calendar** | Every alignment, retrograde turn and sign change, past and future |
+| **Forecast models** | Optional neural benchmark; needs the machine-learning extras |
+| **Data** | The raw numbers behind everything, exportable |
 
 ---
 
-## Read this before trusting a number
+## A word on the numbers
 
-The program will show you correlations, hit rates and fits. Those numbers on
-their own are close to meaningless, for a reason worth understanding.
+The program shows correlations, hit rates and fit scores. Treat them
+carefully: price curves and planetary curves are both smooth, and any two
+smooth lines will appear to correlate strongly even when nothing connects
+them.
 
-Price and the planetary curves are both smooth and strongly autocorrelated.
-Correlate any two smooth series and you get a large number almost regardless of
-whether they are related — two independent random walks routinely correlate
-above 0.8. The textbook p-value assumes independent observations, so on data
-like this it is wrong by orders of magnitude.
+Because of that, every statistic is reported twice — the ordinary figure, and
+one measured against scrambled data that has the same shape but no real
+relationship. **The second number is the one that means something.**
 
-Every test therefore reports two p-values side by side:
+Two things help you calibrate:
 
-- **p (naive)** — the textbook calculation. Almost always tiny. Ignore it.
-- **p (surrogate)** — computed against series preserving your own data's power
-  spectrum and autocorrelation but carrying no relationship. This is the number
-  that means something.
+- **Offline demo data** in the sidebar replaces the price with a random
+  series. Anything the program reports there is what your settings produce
+  from pure noise.
+- **Reality check** in the Statistics tab reruns everything against a
+  scrambled copy of your own data.
 
-Measured examples from this codebase's own test suite, all run on a **pure
-random walk** with no connection to planetary geometry:
-
-| Test | Result | Honest comparison |
-|---|---|---|
-| Wave vs log price | naive p = 0.005 | surrogate p = 0.31 |
-| Cycle matcher | 7 of 8 cycles matched a synodic period within 5% | ~60 candidate periods exist, so a match is near-guaranteed |
-| Parameter search | 0.574 direction accuracy on train | 0.482 on test, median 0.498 across candidates |
-| Rule of all angles | 42.6% hit rate | 59.3% for a matched control |
-
-Every one of those looks like a discovery and is not. That is what the
-machinery is for.
-
-Two tools are built in for calibrating expectations:
-
-- **Offline demo data** — a synthetic random walk. Anything the analysis reports
-  here is your noise floor for the settings you are using.
-- **Reality check** — reruns every test against a phase-randomised copy of
-  *your* series, matching its volatility and autocorrelation exactly while
-  destroying any real relationship.
-
-None of this argues your hypothesis is wrong. It is the machinery for finding
-out, and it is deliberately hard to pass. A result that survives it deserves
-attention. One that does not was never there.
-
-### The one legitimate edge
-
-`signal_offset` in the calibration, and the backward rays in the sky grid, both
-read planetary values from the **future**. That is not lookahead cheating, and
-it is the only real structural advantage here: planetary positions are
-computable decades ahead, so future planetary values are genuinely known today
-in a way no price-derived indicator's ever are.
-
-Future *prices* are never read anywhere, in any module. Only planetary geometry
-is read ahead. Every position is also lagged one bar before it meets a return,
-so nothing is scored against a price it could not have been acted on.
-
-This program is analysis and visualisation software. It is not financial
-advice, and nothing in it is a recommendation to buy or sell anything.
+This is analysis and charting software. It is not financial advice and does
+not tell you what to buy.
 
 ---
 
-## Which build do I want
+## When something goes wrong
 
-|  | Standard | `full` |
-|---|---|---|
-| Command | `BUILD_EXE.bat` | `BUILD_EXE.bat full` |
-| Size | ~350–450 MB | ~1.5–2.5 GB |
-| Startup | a few seconds | ~1 minute, every launch |
-| Everything except the neural benchmark | yes | yes |
-| Forecast models tab | no | yes |
+**"Python 3.13 was not found via the py launcher."**
+Install Python 3.13.12 from the link above and enable the py launcher option.
 
-One-file executables re-extract their whole archive on every launch, so bundle
-size becomes startup time. The benchmark is not lost in the standard build —
-its source ships intact and runs from a source install:
+**"No data returned for ..."**
+Check the symbol on Yahoo Finance. Indices need a caret (`^GSPC`), futures use
+`=F` (`GC=F`), crypto uses a dash (`BTC-USD`). With no internet the program
+falls back to previously downloaded data, and offline demo mode always works.
 
-```
-START.bat ml
-python scripts/run_benchmark.py
-```
+**The build fails partway through.**
+Usually antivirus locking a file while PyInstaller writes it. Add the project
+folder to your exclusions. Otherwise delete the `venv` folder and run again.
+
+**Blank white page in the browser.**
+Wait a few seconds and refresh. If it persists on a built `.exe`, rebuild with
+`BUILD_EXE.bat`.
+
+**The Statistics tab is slow.**
+It is doing thousands of comparisons to produce honest numbers. Lower the
+iteration counts while exploring and raise them when you want a result you
+intend to rely on.
+
+**The build warns about `pydeck.widget` or `pyarrow.tests.parquet`.**
+Expected and harmless. Those are optional add-ons to libraries the program
+uses; they are not needed and the build continues fine.
+
+---
+
+## Where things are saved
+
+| Folder | Contents |
+|---|---|
+| `data\cache\` | Downloaded price data, so the program works offline afterwards |
+| `artifacts\` | Output from the command-line scripts |
+| `dist\` | The built executable |
+
+When running the `.exe`, these sit next to the executable.
 
 ---
 
 ## Command-line tools
 
+Not needed for normal use. Run them from the project folder after `START.bat`
+has set up the environment once.
+
 ```
-python scripts/upcoming_alignments.py --days 365 --orb 1.5
-python scripts/upcoming_alignments.py --bodies JUPITER SATURN --csv out.csv
+python scripts/upcoming_alignments.py --days 365
 python scripts/build_features.py --ticker SPY --start 2010-01-01
-python scripts/run_benchmark.py --epochs 40 --windows 4      # needs ML extras
-python scripts/fetch_news_rss.py                             # needs ML extras
+python scripts/run_benchmark.py            (needs the ml extras)
 ```
 
 ---
 
-## Project layout
-
-```
-kairos/                  the engine, no heavy dependencies
-  skygrid.py             degree-space grid, peak altitudes, radiating rays,
-                         ray intersections, confluence zones
-  astro.py               longitudes, aspects, stations, ingresses,
-                         synodic periods, harmonic indices
-  waves.py               trickle-down composite, cycle detection,
-                         surrogate and permutation significance tests
-  calibrate.py           parameter search with train/test separation,
-                         null model, forward signal projection
-  gann.py                Square of Nine, fans, pivots, time counts,
-                         angle state, rule of all angles, clusters
-  market.py              price loading, caching, offline fallback
-  charting.py            Plotly figure builders
-  paths.py               resource paths for source and frozen runs
-
-gui/app.py               the Streamlit application
-kairos_app.py            launcher, used by START.bat and the exe
-
-stock_forecast/          optional ML benchmark
-  pipeline.py            feature assembly and walk-forward evaluation
-  models/                ARIMA, conditional LSTM, conditional WGAN-GP
-  train_lstm.py          training with early stopping on direction accuracy
-  train_gan.py           WGAN-GP training, noise-averaged prediction
-  metrics.py             errors, direction accuracy, Diebold-Mariano
-  backtest.py            long/short with costs and lagged signals
-  meta_labeling.py       signal accept/reject filter
-  splits.py              walk-forward window generation
-
-scripts/                 command-line entry points
-configs/default.yaml     defaults for the scripts
-requirements.txt         pinned runtime dependencies
-requirements-ml.txt      pinned optional ML extras
-Kairos-StarVector.spec   PyInstaller build recipe
-BUILD_EXE.bat            build the executable
-START.bat                run from source
-CHANGES.md               full changelog
-```
-
-Runtime output goes to `data/cache/` (price data, so the app works offline
-after the first fetch) and `artifacts/` (script results). Both sit next to the
-executable when frozen.
-
----
-
-## Notes on the astronomy
-
-Positions come from **PyEphem**, which embeds VSOP87 for the planets and the
-Chapront lunar theory directly in its compiled extension. No data files, no
-network access, accurate to a few arc-seconds — orders of magnitude finer than
-the orbs any aspect study uses.
-
-This replaced Skyfield, which requires the DE421 kernel downloaded from NASA on
-first run. Workable from source, impossible in a one-file executable where the
-download lands in a temp directory wiped on exit and PyInstaller cannot see the
-file at build time.
-
-**Peak altitude** uses the standard relation for a body's highest point:
-
-```
-alt_max = 90 - |latitude - declination|
-```
-
-Verified against PyEphem's own observer transit calculation to within 0.04
-degrees, and it reproduces the textbook solstice altitudes: at latitude 47.8
-the Sun peaks at 65.62° in June and 18.75° in December.
-
-Both frames are available. **Geocentric** is what Gann and astrologers used.
-**Heliocentric** is what the Bradley siderograph uses, with Earth replacing the
-Sun.
-
-Synodic periods are measured from long-baseline mean motions rather than from
-your loaded date range, and verify against published values:
-
-| Pair | Computed | Published |
-|---|---|---|
-| Moon–Sun | 29.53 d | 29.53 d |
-| Mercury–Earth | 115.88 d | 115.88 d |
-| Venus–Jupiter | 236.99 d | 236.99 d |
-| Sun–Jupiter | 398.90 d | 398.88 d |
-| Mars–Jupiter | 816.42 d | 816.4 d |
-| Jupiter–Saturn | 7253.98 d | 7253.5 d |
-| Saturn–Uranus | 16561 d | 16568 d |
-
-Pairs involving the Moon are computed geocentrically, the rest
-heliocentrically. That split is necessary rather than stylistic — the Sun and
-Mercury share a mean *geocentric* motion, so their relative longitude never
-accumulates and a geocentric calculation diverges instead of returning 116
-days.
-
----
-
-## Troubleshooting
-
-**"Python 3.13 was not found via the py launcher."** Install Python 3.13.12 and
-enable the py launcher during setup. The build refuses other versions because
-the pinned wheels are the CPython 3.13 Windows builds.
-
-**Every ray looks vertical.** The 1x1 rate is set manually and is too steep for
-the window. Switch the 1x1 rate to "square the chart".
-
-**The chart is an opaque lattice.** In order: reduce "dots that emit rays", set
-a ray length instead of unlimited, remove ray ratios, turn off fast ratios.
-
-**Build fails partway through.** Usually antivirus locking a file in `build\` or
-`dist\`. Add the project folder to your exclusions, or delete `venv\` and rerun.
-
-**Exe takes a long time to start.** Expected for one-file builds — the archive
-extracts on every launch. Run from source with `START.bat` if startup time
-matters.
-
-**"No data returned for ..."** Check the symbol on Yahoo Finance directly.
-Indices need a caret: `^GSPC`. Futures use `=F`: `GC=F`. Crypto uses a dash:
-`BTC-USD`. If the network is unavailable the app falls back to cached data, and
-offline demo mode always works.
-
-**Blank white page in the browser.** The server started but the frontend assets
-are missing, meaning the build did not collect Streamlit's static files.
-Rebuild with `BUILD_EXE.bat`, which uses the spec file that handles it.
-
-**Statistics tab is slow.** Surrogate and permutation tests are the cost of
-honest p-values. Lower the iteration counts while exploring, raise them for a
-result you intend to rely on.
+MIT licensed. See `CHANGES.md` for what has changed between releases.

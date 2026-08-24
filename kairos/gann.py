@@ -32,9 +32,9 @@ import pandas as pd
 
 # Gann's preferred fan ratios: price units per time unit.
 FAN_RATIOS: Dict[str, float] = {
-    "1x8": 1 / 8, "1x4": 1 / 4, "1x3": 1 / 3, "1x2": 1 / 2,
+    "1x16": 1 / 16, "1x8": 1 / 8, "1x4": 1 / 4, "1x3": 1 / 3, "1x2": 1 / 2,
     "1x1": 1.0,
-    "2x1": 2.0, "3x1": 3.0, "4x1": 4.0, "8x1": 8.0,
+    "2x1": 2.0, "3x1": 3.0, "4x1": 4.0, "8x1": 8.0, "16x1": 16.0,
 }
 
 # Divisions of the circle Gann used for time counts.

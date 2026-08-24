@@ -13,7 +13,7 @@ Nothing here is imported by the main GUI at startup, so the app runs
 without torch installed. Import failures surface where they are used, in
 the Forecast models tab, rather than preventing the program from opening.
 """
-__version__ = "6.0.0"
+__version__ = "6.0.2"
 __all__ = [
     "pipeline", "metrics", "eval", "backtest", "splits",
     "meta_labeling", "train_lstm", "train_gan", "models", "utils",
